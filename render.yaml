@@ -1,0 +1,36 @@
+# Render Blueprint — LocalGo SIT API
+# Apply: Render Dashboard → New → Blueprint
+# Guide: docs/sit-deploy.md
+
+services:
+  - type: web
+    name: localgo-api-sit
+    runtime: docker
+    region: singapore
+    plan: free
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Staging
+      - key: ConnectionStrings__Default
+        sync: false
+      - key: ConnectionStrings__Redis
+        sync: false
+      - key: Jwt__SigningKey
+        sync: false
+      - key: Jwt__Issuer
+        value: LocalGo-SIT
+      - key: Jwt__Audience
+        value: LocalGo-SIT
+      - key: Line__ChannelId
+        sync: false
+      - key: Line__ChannelSecret
+        sync: false
+      - key: Line__LiffId
+        sync: false
+      - key: Line__MessagingAccessToken
+        sync: false
+      - key: Cors__AllowedOrigins
+        sync: false

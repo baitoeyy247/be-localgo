@@ -1,0 +1,32 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Debug",
+      "Microsoft.AspNetCore": "Information"
+    }
+  },
+  "ConnectionStrings": {
+    "Default": "Host=localhost;Port=5432;Database=localgo;Username=localgo;Password=localgo_dev",
+    "Redis": "localhost:6379"
+  },
+  "Jwt": {
+    "Issuer": "LocalGo-Dev",
+    "Audience": "LocalGo-Dev",
+    "SigningKey": "CHANGE_ME_min_32_characters_for_dev_only",
+    "ExpiresDays": 7
+  },
+  "Line": {
+    "ChannelId": "2010177046",
+    "ChannelSecret": "YOUR_LINE_CHANNEL_SECRET",
+    "LiffId": "",
+    "MessagingAccessToken": "YOUR_MESSAGING_ACCESS_TOKEN"
+  },
+  "Cors": {
+    "AllowedOrigins": "http://localhost:4200",
+    "NgrokPublicUrl": "https://YOUR-SUBDOMAIN.ngrok-free.app"
+  },
+  "Pilot": {
+    "Enabled": false,
+    "BoundsJson": ""
+  }
+}

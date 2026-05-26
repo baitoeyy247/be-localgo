@@ -52,3 +52,14 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Local secrets — never commit real credentials
+appsettings.Development.json
+appsettings.Staging.json
+!appsettings.Staging.json.example
+appsettings.Staging.local.json
+**/appsettings.*.local.json
+.env
+.env.*
+!.env.example
+!.env.*.example

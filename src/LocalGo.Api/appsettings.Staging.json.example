@@ -1,0 +1,31 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "ConnectionStrings": {
+    "Default": "Host=YOUR-NEON-HOST.neon.tech;Database=localgo;Username=YOUR_USER;Password=YOUR_PASSWORD;SSL Mode=Require",
+    "Redis": "YOUR_UPSTASH_REDIS_URL_OR_LEAVE_EMPTY"
+  },
+  "Jwt": {
+    "Issuer": "LocalGo-SIT",
+    "Audience": "LocalGo-SIT",
+    "SigningKey": "CHANGE_ME_min_32_characters_for_sit",
+    "ExpiresDays": 7
+  },
+  "Line": {
+    "ChannelId": "2010177240",
+    "ChannelSecret": "YOUR_LINE_CHANNEL_SECRET",
+    "LiffId": "2010177240-Bu98ZCLT",
+    "MessagingAccessToken": "YOUR_MESSAGING_ACCESS_TOKEN"
+  },
+  "Cors": {
+    "AllowedOrigins": "https://YOUR-PROJECT.pages.dev"
+  },
+  "Pilot": {
+    "Enabled": false,
+    "BoundsJson": ""
+  }
+}

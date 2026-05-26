@@ -1,0 +1,10 @@
+{
+  "Line": {
+    "ChannelSecret": "paste-from-line-login-channel-2010177046-basic-settings",
+    "MessagingAccessToken": "paste-from-messaging-api-tab-channel-access-token",
+    "LiffId": "paste-liff-id-after-creating-liff-app"
+  },
+  "Cors": {
+    "AllowedOrigins": "http://localhost:4200,https://YOUR-SUBDOMAIN.ngrok-free.app"
+  }
+}

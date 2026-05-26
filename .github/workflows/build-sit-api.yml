@@ -1,0 +1,19 @@
+name: Build SIT API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**'
+      - '!docs/**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API Docker image
+        run: docker build -t localgo-api-sit .
