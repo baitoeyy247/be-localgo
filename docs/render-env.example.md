@@ -1,6 +1,6 @@
 # Render env vars (names only — paste values in Dashboard, never commit secrets)
 
-Set these on Render for `localgo-api-sit`:
+Set these on Render for `be-localgo`:
 
 ```
 ASPNETCORE_ENVIRONMENT=Staging

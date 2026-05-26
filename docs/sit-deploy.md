@@ -5,7 +5,7 @@ Deploy สภาพแวดล้อม **SIT** ด้วย:
 | ชั้น | แพลตฟอร์ม | URL ตัวอย่าง |
 |------|-----------|--------------|
 | Frontend | Cloudflare Pages | `https://localgo-sit.pages.dev` |
-| API | Render (Docker, Singapore) | `https://localgo-api-sit.onrender.com` |
+| API | Render (Docker, Singapore) | `https://be-localgo.onrender.com` |
 | Database | Neon PostgreSQL + PostGIS (Singapore) | connection string |
 | Redis (optional) | Upstash Redis (Singapore) | `rediss://...` |
 
@@ -106,7 +106,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 |--------|----------|
 | `CLOUDFLARE_API_TOKEN` | token จากข้อ 3 |
 | `CLOUDFLARE_ACCOUNT_ID` | จาก Cloudflare Dashboard URL |
-| `SIT_API_BASE_URL` | `https://localgo-api-sit.onrender.com/api` |
+| `SIT_API_BASE_URL` | `https://be-localgo.onrender.com/api` |
 | `SIT_LIFF_ID` | `2010177240-Bu98ZCLT` |
 
 5. Push ขึ้น `main` หรือรัน workflow **Deploy SIT Frontend** แบบ manual
@@ -142,10 +142,10 @@ Build settings:
 chmod +x scripts/sit-verify.sh
 
 # หลัง API deploy
-./scripts/sit-verify.sh https://localgo-api-sit.onrender.com
+./scripts/sit-verify.sh https://be-localgo.onrender.com
 
 # หลัง FE deploy
-./scripts/sit-verify.sh https://localgo-api-sit.onrender.com https://localgo-sit.pages.dev
+./scripts/sit-verify.sh https://be-localgo.onrender.com https://localgo-sit.pages.dev
 ```
 
 เปิด LIFF:
@@ -157,7 +157,7 @@ https://liff.line.me/2010177240-Bu98ZCLT/
 Swagger SIT (เปิดบน Staging):
 
 ```text
-https://localgo-api-sit.onrender.com/swagger
+https://be-localgo.onrender.com/swagger
 ```
 
 ---
@@ -166,7 +166,7 @@ https://localgo-api-sit.onrender.com/swagger
 
 ```bash
 # FE
-export NG_APP_API_BASE_URL=https://localgo-api-sit.onrender.com/api
+export NG_APP_API_BASE_URL=https://be-localgo.onrender.com/api
 node scripts/generate-fe-environment.mjs
 cd fe-localgo && npm run build:sit
 

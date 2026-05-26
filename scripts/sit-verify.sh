@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${1:-${SIT_API_URL:-https://localgo-api-sit.onrender.com}}"
+API_URL="${1:-${SIT_API_URL:-https://be-localgo.onrender.com}}"
 FE_URL="${2:-${SIT_FE_URL:-}}"
 
 API_URL="${API_URL%/}"
