@@ -6,7 +6,7 @@
     }
   },
   "ConnectionStrings": {
-    "Default": "Host=localhost;Port=5432;Database=localgo;Username=localgo;Password=localgo_dev",
+    "Default": "Host=localhost;Port=5432;Database=localgo;Username=admin;Password=P@ssw0rd",
     "Redis": "localhost:6379"
   },
   "Jwt": {

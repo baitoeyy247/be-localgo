@@ -6,6 +6,7 @@ using LocalGo.Infrastructure;
 using LocalGo.Infrastructure.Persistence;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -107,7 +108,18 @@ if (isDevOrSit)
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<LocalGoDbContext>();
-    await db.Database.MigrateAsync();
+    try
+    {
+        await db.Database.MigrateAsync();
+    }
+    catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InsufficientPrivilege
+        && ex.MessageText.Contains("postgis", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "PostGIS is required before LocalGo migrations can run. Connect to the target database with a privileged user and run: CREATE EXTENSION IF NOT EXISTS postgis;",
+            ex);
+    }
+
     await DataSeeder.SeedAsync(db);
 }
 

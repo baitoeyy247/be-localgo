@@ -63,3 +63,4 @@ appsettings.Staging.local.json
 .env.*
 !.env.example
 !.env.*.example
+.fake

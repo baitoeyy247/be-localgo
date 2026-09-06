@@ -17,6 +17,7 @@ tests/
 ## Run
 
 ```bash
+docker compose up -d db redis
 cp src/LocalGo.Api/appsettings.Development.json.example src/LocalGo.Api/appsettings.Development.json
 dotnet run --project src/LocalGo.Api
 ```
@@ -24,7 +25,32 @@ dotnet run --project src/LocalGo.Api
 - Swagger: http://localhost:5080/swagger
 - Health: http://localhost:5080/api/health
 
-Requires Docker infra from repo root: `../scripts/dev-up.sh`
+The compose stack starts PostgreSQL with PostGIS enabled and Redis locally. The default development connection string uses:
+
+```text
+Host=localhost;Port=5432;Database=localgo;Username=admin;Password=P@ssw0rd
+```
+
+If you use your own PostgreSQL instead of Docker Compose, connect with a privileged PostgreSQL user and enable PostGIS in the `localgo` database before the first run:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS postgis;
+```
+
+For Neon or another managed PostgreSQL provider, run `scripts/sit-neon-init.sql` in the provider SQL editor before starting the API.
+
+If you previously created the local Docker database before this compose file existed, recreate the volume so the init script runs:
+
+```bash
+docker compose down -v
+docker compose up -d db redis
+```
+
+To run the API in Docker too:
+
+```bash
+docker compose --profile api up --build
+```
 
 ### Migrations
 

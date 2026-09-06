@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: localgo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: localgo
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: P@ssw0rd
+    ports:
+      - "5432:5432"
+    volumes:
+      - localgo-postgres-data:/var/lib/postgresql/data
+      - ./scripts/local-postgres-init.sql:/docker-entrypoint-initdb.d/01-local-postgres-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d localgo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: localgo-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - localgo-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    profiles: ["api"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: localgo-api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: Host=db;Port=5432;Database=localgo;Username=admin;Password=P@ssw0rd
+      ConnectionStrings__Redis: redis:6379
+      Jwt__Issuer: LocalGo-Dev
+      Jwt__Audience: LocalGo-Dev
+      Jwt__SigningKey: CHANGE_ME_min_32_characters_for_dev_only
+      Cors__AllowedOrigins: http://localhost:4200
+    ports:
+      - "5080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  localgo-postgres-data:
+  localgo-redis-data:
