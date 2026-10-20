@@ -38,6 +38,8 @@ public sealed class ServiceRequestResponseDto
     public double Latitude { get; init; }
     public double Longitude { get; init; }
     public int SearchRadiusMeters { get; init; }
+    public DateTime? PreferredStartAt { get; init; }
+    public DateTime? PreferredEndAt { get; init; }
     public string? BudgetText { get; init; }
     public Guid? SelectedProviderId { get; init; }
     public Guid? SelectedBidId { get; init; }

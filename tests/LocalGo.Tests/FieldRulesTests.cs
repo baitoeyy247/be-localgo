@@ -76,6 +76,59 @@ public sealed class FieldRulesTests
     }
 
     [Fact]
+    public void Preferred_time_accepts_a_future_start_and_later_end()
+    {
+        var now = new DateTime(2026, 10, 21, 3, 0, 0, DateTimeKind.Utc);
+        var (start, end) = FieldRules.RequirePreferredTime(now.AddHours(2), now.AddHours(4), now);
+        Assert.Equal(DateTimeKind.Utc, start.Kind);
+        Assert.Equal(now.AddHours(2), start);
+        Assert.Equal(now.AddHours(4), end);
+    }
+
+    [Fact]
+    public void Preferred_time_rejects_a_missing_or_past_start()
+    {
+        var now = new DateTime(2026, 10, 21, 3, 0, 0, DateTimeKind.Utc);
+        var missing = Assert.Throws<AppException>(() => FieldRules.RequirePreferredTime(null, null, now));
+        Assert.Equal(400, missing.StatusCode);
+        Assert.Contains("กรุณาเลือกวันที่และเวลาที่ต้องการ", missing.Message);
+
+        var past = Assert.Throws<AppException>(() => FieldRules.RequirePreferredTime(now.AddHours(-2), null, now));
+        Assert.Equal(400, past.StatusCode);
+        Assert.Contains("ไม่เป็นเวลาในอดีต", past.Message);
+
+        var endedFirst = Assert.Throws<AppException>(() =>
+            FieldRules.RequirePreferredTime(now.AddHours(4), now.AddHours(2), now));
+        Assert.Equal(400, endedFirst.StatusCode);
+        Assert.Contains("เวลาสิ้นสุด", endedFirst.Message);
+    }
+
+    [Fact]
+    public async Task Create_request_returns_400_for_a_past_preferred_time()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var sut = new ServiceRequestAppService(db, TestDbFactory.NoopNotifications(), NullLogger<ServiceRequestAppService>.Instance);
+        var ex = await Assert.ThrowsAsync<AppException>(() => sut.CreateAsync(
+            Guid.NewGuid(),
+            new CreateServiceRequestDto(
+                Guid.NewGuid(),
+                "งาน",
+                null,
+                null,
+                13.7,
+                100.5,
+                5000,
+                DateTime.UtcNow.AddHours(-3),
+                null,
+                "เปิดรับราคา",
+                true),
+            CancellationToken.None));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Contains("ไม่เป็นเวลาในอดีต", ex.Message);
+        Assert.Empty(db.ServiceRequests);
+    }
+
+    [Fact]
     public async Task Create_request_returns_400_for_invalid_budget()
     {
         await using var db = TestDbFactory.CreateContext();

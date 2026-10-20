@@ -35,8 +35,8 @@ public sealed class ServiceRequestAppService(
     {
         FieldRules.RequireBudget(request.BudgetText);
         FieldRules.RequireRequestText(request.Title, request.Description);
-
         var now = DateTime.UtcNow;
+        var preferred = FieldRules.RequirePreferredTime(request.PreferredStartAt, request.PreferredEndAt, now);
         var entity = new ServiceRequest
         {
             Id = Guid.NewGuid(),
@@ -49,8 +49,8 @@ public sealed class ServiceRequestAppService(
             Longitude = request.Longitude,
             Location = GeoHelper.CreatePoint(request.Latitude, request.Longitude),
             SearchRadiusMeters = request.SearchRadiusMeters,
-            PreferredStartAt = request.PreferredStartAt,
-            PreferredEndAt = request.PreferredEndAt,
+            PreferredStartAt = preferred.Start,
+            PreferredEndAt = preferred.End,
             BudgetText = request.BudgetText,
             Status = request.Publish ? ServiceRequestStatus.Open : ServiceRequestStatus.Draft,
             LastProgressAt = now,
@@ -78,6 +78,9 @@ public sealed class ServiceRequestAppService(
             throw new AppException("Only draft requests can be published.", 409);
         }
 
+        var preferred = FieldRules.RequirePreferredTime(entity.PreferredStartAt, entity.PreferredEndAt, DateTime.UtcNow);
+        entity.PreferredStartAt = preferred.Start;
+        entity.PreferredEndAt = preferred.End;
         entity.Status = ServiceRequestStatus.Open;
         ProgressHelper.Touch(entity);
         await db.SaveChangesAsync(cancellationToken);

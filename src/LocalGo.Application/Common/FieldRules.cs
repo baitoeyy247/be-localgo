@@ -44,6 +44,38 @@ public static class FieldRules
         }
     }
 
+    /// <summary>
+    /// Requires a desired start that is not in the past. An optional end must be the same instant or later.
+    /// Returns the values normalized to UTC for timestamptz storage.
+    /// </summary>
+    public static (DateTime Start, DateTime? End) RequirePreferredTime(DateTime? start, DateTime? end, DateTime utcNow)
+    {
+        if (start is null)
+        {
+            throw new AppException("กรุณาเลือกวันที่และเวลาที่ต้องการ", 400);
+        }
+
+        var startUtc = AsUtc(start.Value);
+        var earliest = AsUtc(utcNow).AddMinutes(-1);
+        if (startUtc < earliest)
+        {
+            throw new AppException("วันที่และเวลาที่ต้องการต้องไม่เป็นเวลาในอดีต", 400);
+        }
+
+        if (end is null)
+        {
+            return (startUtc, null);
+        }
+
+        var endUtc = AsUtc(end.Value);
+        if (endUtc < startUtc)
+        {
+            throw new AppException("เวลาสิ้นสุดต้องไม่ก่อนเวลาที่ต้องการ", 400);
+        }
+
+        return (startUtc, endUtc);
+    }
+
     public static void RequireRequestText(string? title, string? description)
     {
         if (string.IsNullOrWhiteSpace(title))
@@ -130,6 +162,13 @@ public static class FieldRules
 
         return amount > 0 && amount <= BudgetMax && amount == decimal.Truncate(amount);
     }
+
+    private static DateTime AsUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
 
     private static readonly Regex PositiveAmountPattern = new(@"^\d+$", RegexOptions.CultureInvariant);
 }
