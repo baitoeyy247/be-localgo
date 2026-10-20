@@ -24,10 +24,14 @@ public sealed class AuthController(
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> DevLogin([FromBody] DevLoginRequest request, CancellationToken cancellationToken)
     {
-        // The SIT site runs as Staging and uses this same demo admin shortcut.
         if (!environment.IsDevelopment() && !environment.IsStaging())
         {
             return NotFound();
+        }
+
+        if (request.AsAdmin && !environment.IsDevelopment())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         var response = await devAuth.LoginAsync(request, cancellationToken);

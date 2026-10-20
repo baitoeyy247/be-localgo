@@ -21,6 +21,7 @@ public sealed class JwtTokenGenerator(IOptions<JwtSettings> options) : IJwtToken
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new("lineUserId", user.LineUserId),
             new(ClaimTypes.Role, user.SystemRole.ToString()),
+            new("role", user.SystemRole.ToString()),
             new("systemRole", user.SystemRole.ToString()),
         };
 

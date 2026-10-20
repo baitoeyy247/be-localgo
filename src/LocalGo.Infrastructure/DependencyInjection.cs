@@ -68,7 +68,7 @@ public static class DependencyInjection
             });
 
         services.AddAuthorizationBuilder()
-            .AddPolicy("Admin", policy => policy.RequireRole(nameof(Domain.Enums.SystemRole.Admin)));
+            .AddPolicy("Admin", policy => policy.RequireAssertion(context => AdminAccess.IsAdmin(context.User)));
 
         return services;
     }

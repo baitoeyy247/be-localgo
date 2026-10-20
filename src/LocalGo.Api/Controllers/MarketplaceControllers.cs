@@ -1,4 +1,5 @@
 using AutoMapper;
+using LocalGo.Api.Auth;
 using LocalGo.Application.Abstractions.Auth;
 using LocalGo.Application.Abstractions.Persistence;
 using LocalGo.Application.Dtos;
@@ -427,6 +428,7 @@ public sealed class ReportsController(ICurrentUserService currentUser, ReportApp
 [ApiController]
 [Route("api/admin")]
 [Authorize(Policy = "Admin")]
+[RequireAdmin]
 public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db) : ControllerBase
 {
     [HttpGet("dashboard")]

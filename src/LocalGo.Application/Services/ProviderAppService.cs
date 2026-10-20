@@ -22,6 +22,8 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
             throw new AppException("Invalid provider type.", 400);
         }
 
+        FieldRules.RequireThaiMobile(request.ContactPhone);
+
         var now = DateTime.UtcNow;
         var provider = new Provider
         {
@@ -31,7 +33,7 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
             Name = request.Name.Trim(),
             Description = request.Description,
             ContactLineId = request.ContactLineId,
-            ContactPhone = request.ContactPhone,
+            ContactPhone = string.IsNullOrWhiteSpace(request.ContactPhone) ? null : request.ContactPhone.Trim(),
             ContactUrl = request.ContactUrl,
             Status = ProviderStatus.Active,
             CreatedAt = now,
@@ -62,7 +64,19 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
         if (request.Name is not null) provider.Name = request.Name.Trim();
         if (request.Description is not null) provider.Description = request.Description;
         if (request.ContactLineId is not null) provider.ContactLineId = request.ContactLineId;
-        if (request.ContactPhone is not null) provider.ContactPhone = request.ContactPhone;
+        if (request.ContactPhone is not null)
+        {
+            var phone = request.ContactPhone.Trim();
+            if (phone.Length == 0)
+            {
+                provider.ContactPhone = null;
+            }
+            else
+            {
+                FieldRules.RequireThaiMobile(phone);
+                provider.ContactPhone = phone;
+            }
+        }
         if (request.ContactUrl is not null) provider.ContactUrl = request.ContactUrl;
         if (request.Status is not null && Enum.TryParse<ProviderStatus>(request.Status, true, out var status))
         {
@@ -120,6 +134,12 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
         Guid userId, Guid providerId, CreateServiceRequest request, CancellationToken cancellationToken)
     {
         var provider = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            throw new AppException("กรุณากรอกชื่อบริการ", 400);
+        }
+
+        FieldRules.RequirePrice(request.BasePriceText);
         var now = DateTime.UtcNow;
         var service = new ProviderService
         {
@@ -202,7 +222,8 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
 
         if (request.BasePriceText is not null)
         {
-            service.BasePriceText = request.BasePriceText;
+            FieldRules.RequirePrice(request.BasePriceText);
+            service.BasePriceText = request.BasePriceText.Trim();
         }
 
         service.UpdatedAt = DateTime.UtcNow;

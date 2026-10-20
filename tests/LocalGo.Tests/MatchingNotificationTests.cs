@@ -37,7 +37,7 @@ public sealed class MatchingNotificationTests
                 seed.SearchRadiusMeters,
                 null,
                 null,
-                null,
+                "เปิดรับราคา",
                 Publish: false),
             CancellationToken.None);
 
@@ -95,7 +95,7 @@ public sealed class MatchingNotificationTests
                 seed.SearchRadiusMeters,
                 null,
                 null,
-                null,
+                "เปิดรับราคา",
                 Publish: true),
             CancellationToken.None);
 
@@ -135,7 +135,7 @@ public sealed class MatchingNotificationTests
                 seed.SearchRadiusMeters,
                 null,
                 null,
-                null,
+                "เปิดรับราคา",
                 Publish: true),
             CancellationToken.None);
 

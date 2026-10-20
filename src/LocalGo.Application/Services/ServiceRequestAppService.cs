@@ -31,6 +31,12 @@ public sealed class ServiceRequestAppService(
     /// <summary>Creates a draft or published marketplace service request.</summary>
     public async Task<ServiceRequest> CreateAsync(Guid userId, CreateServiceRequestDto request, CancellationToken cancellationToken)
     {
+        FieldRules.RequireBudget(request.BudgetText);
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            throw new AppException("กรุณากรอกหัวข้องาน", 400);
+        }
+
         var now = DateTime.UtcNow;
         var entity = new ServiceRequest
         {
