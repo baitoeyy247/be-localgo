@@ -24,7 +24,8 @@ public sealed class AuthController(
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> DevLogin([FromBody] DevLoginRequest request, CancellationToken cancellationToken)
     {
-        if (!environment.IsDevelopment())
+        // The SIT site runs as Staging and uses this same demo admin shortcut.
+        if (!environment.IsDevelopment() && !environment.IsStaging())
         {
             return NotFound();
         }
