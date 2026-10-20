@@ -44,12 +44,12 @@ public static class NotificationMessageBuilder
 
             NotificationEvents.AppointmentCreated => (
                 "สร้างนัดหมายแล้ว",
-                JoinLines(serviceBlock, $"สถานะ: {GetStr(payload, "status")}"),
+                JoinLines(serviceBlock, $"สถานะ: {FormatAppointmentStatus(GetStr(payload, "status"))}"),
                 null),
 
             NotificationEvents.AppointmentUpdated => (
                 "อัปเดตสถานะนัดหมาย",
-                JoinLines(serviceBlock, $"สถานะ: {GetStr(payload, "status")}"),
+                JoinLines(serviceBlock, $"สถานะ: {FormatAppointmentStatus(GetStr(payload, "status"))}"),
                 null),
 
             NotificationEvents.RequestExpiringSoon => (
@@ -202,6 +202,16 @@ public static class NotificationMessageBuilder
 
         return $"/provider/requests/{requestIdStr}";
     }
+
+    private static string FormatAppointmentStatus(string status) => status switch
+    {
+        "Pending" => "รอผู้ให้บริการยืนยันนัด",
+        "Confirmed" => "ผู้ให้บริการยืนยันนัดแล้ว",
+        "InProgress" => "กำลังดำเนินงาน",
+        "Completed" => "เสร็จสิ้น",
+        "Cancelled" => "ยกเลิกแล้ว",
+        _ => status,
+    };
 
     private static string GetStr(JsonElement? el, string key) =>
         el?.TryGetProperty(key, out var v) == true ? v.GetString() ?? "" : "";

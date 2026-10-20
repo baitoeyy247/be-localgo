@@ -134,6 +134,7 @@ public sealed class NotificationMessageBuilderTests
             $"/requester/appointment?requestId={seed.Request.Id}",
             json,
             StringComparison.Ordinal);
+        Assert.Contains("ผู้ให้บริการยืนยันนัดแล้ว", json, StringComparison.Ordinal);
     }
 
     [Fact]

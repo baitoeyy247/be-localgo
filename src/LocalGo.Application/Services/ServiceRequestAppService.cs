@@ -190,26 +190,74 @@ public sealed class ServiceRequestAppService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Marks a request as in progress for requester or selected provider.</summary>
+    /// <summary>Marks a confirmed appointment's request as in progress. Provider only when an appointment exists.</summary>
     public async Task StartAsync(Guid userId, Guid requestId, CancellationToken cancellationToken)
     {
         var entity = await db.ServiceRequests.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
         await MarketplaceAccess.EnsureServiceRequestParticipantAsync(db, userId, entity, cancellationToken);
+        await MoveActiveAppointmentAsync(
+            userId,
+            entity.Id,
+            AppointmentStatus.Confirmed,
+            AppointmentStatus.InProgress,
+            "ยืนยันนัดหมายก่อนเริ่มงาน",
+            cancellationToken);
         entity.Status = ServiceRequestStatus.InProgress;
         ProgressHelper.Touch(entity);
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Marks a request as completed for requester or selected provider.</summary>
+    /// <summary>Marks an in-progress job completed. Provider only when an appointment exists.</summary>
     public async Task CompleteAsync(Guid userId, Guid requestId, CancellationToken cancellationToken)
     {
         var entity = await db.ServiceRequests.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
         await MarketplaceAccess.EnsureServiceRequestParticipantAsync(db, userId, entity, cancellationToken);
+        await MoveActiveAppointmentAsync(
+            userId,
+            entity.Id,
+            AppointmentStatus.InProgress,
+            AppointmentStatus.Completed,
+            "เริ่มงานก่อนปิดงาน",
+            cancellationToken);
         entity.Status = ServiceRequestStatus.Completed;
         ProgressHelper.Touch(entity);
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task MoveActiveAppointmentAsync(
+        Guid userId,
+        Guid requestId,
+        AppointmentStatus requiredCurrent,
+        AppointmentStatus next,
+        string blockedMessage,
+        CancellationToken cancellationToken)
+    {
+        var appointment = await db.Appointments
+            .FirstOrDefaultAsync(
+                a => a.ServiceRequestId == requestId && a.Status != AppointmentStatus.Cancelled,
+                cancellationToken);
+        if (appointment is null || appointment.Status == next)
+        {
+            return;
+        }
+
+        if (appointment.Status != requiredCurrent)
+        {
+            throw new AppException(blockedMessage, 409);
+        }
+
+        var isProvider = await db.Providers.AsNoTracking().AnyAsync(
+            p => p.OwnerUserId == userId && p.Id == appointment.ProviderId,
+            cancellationToken);
+        if (!isProvider)
+        {
+            throw new AppException("เฉพาะผู้ให้บริการที่เดินงานนี้ต่อได้", 403);
+        }
+
+        appointment.Status = next;
+        appointment.UpdatedAt = DateTime.UtcNow;
     }
 
     public async Task ExpireStaleAsync(CancellationToken cancellationToken)

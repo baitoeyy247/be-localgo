@@ -148,11 +148,15 @@ public sealed class AppointmentAppService(
 
         await MarketplaceAccess.EnsureAppointmentParticipantAsync(db, userId, appointment, cancellationToken);
 
-        if (status == AppointmentStatus.Cancelled
-            && appointment.Status is not (AppointmentStatus.Pending or AppointmentStatus.Confirmed))
+        if (appointment.Status == status)
         {
-            throw new AppException("Cannot cancel appointment in the current status.", 409);
+            return appointment;
         }
+
+        var isProvider = await db.Providers.AsNoTracking().AnyAsync(
+            p => p.OwnerUserId == userId && p.Id == appointment.ProviderId,
+            cancellationToken);
+        EnsureTransition(appointment.Status, status, isProvider);
 
         appointment.Status = status;
         appointment.UpdatedAt = DateTime.UtcNow;
@@ -233,6 +237,33 @@ public sealed class AppointmentAppService(
         if (request.Latitude is double lat && request.Longitude is double lng)
         {
             appointment.Location = GeoHelper.CreatePoint(lat, lng);
+        }
+    }
+
+    /// <summary>
+    /// Confirmed → in progress → completed is provider-only.
+    /// Either participant may cancel before the job starts.
+    /// </summary>
+    private static void EnsureTransition(AppointmentStatus current, AppointmentStatus next, bool isProvider)
+    {
+        switch (current, next)
+        {
+            case (AppointmentStatus.Pending, AppointmentStatus.Confirmed):
+            case (AppointmentStatus.Confirmed, AppointmentStatus.InProgress):
+            case (AppointmentStatus.InProgress, AppointmentStatus.Completed):
+                if (!isProvider)
+                {
+                    throw new AppException("เฉพาะผู้ให้บริการที่เดินงานนี้ต่อได้", 403);
+                }
+
+                return;
+            case (AppointmentStatus.Pending, AppointmentStatus.Cancelled):
+            case (AppointmentStatus.Confirmed, AppointmentStatus.Cancelled):
+                return;
+            case (_, AppointmentStatus.Cancelled):
+                throw new AppException("Cannot cancel appointment in the current status.", 409);
+            default:
+                throw new AppException("ไม่สามารถเปลี่ยนสถานะนัดหมายในขั้นตอนนี้", 409);
         }
     }
 

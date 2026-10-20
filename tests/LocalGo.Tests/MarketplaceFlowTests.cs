@@ -1,5 +1,8 @@
+using LocalGo.Application.Common;
+using LocalGo.Application.Dtos;
 using LocalGo.Application.Services;
 using LocalGo.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LocalGo.Tests;
@@ -133,5 +136,111 @@ public sealed class MarketplaceFlowTests
             CancellationToken.None);
 
         Assert.Null(detail);
+    }
+
+    [Fact]
+    public async Task Provider_advances_confirmed_appointment_through_completion_and_requester_can_review()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db, withPendingAppointment: true);
+        var notifications = TestDbFactory.NoopNotifications();
+        var appointments = new AppointmentAppService(
+            db,
+            notifications,
+            NullLogger<AppointmentAppService>.Instance);
+        var reviews = new ReviewAppService(db, notifications);
+
+        var confirmed = await appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id,
+            seed.Appointment!.Id,
+            AppointmentStatus.Confirmed,
+            CancellationToken.None);
+        Assert.Equal(AppointmentStatus.Confirmed, confirmed.Status);
+        Assert.Equal(ServiceRequestStatus.Scheduled, seed.Request.Status);
+
+        var skipped = await Assert.ThrowsAsync<AppException>(() => appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id,
+            seed.Appointment.Id,
+            AppointmentStatus.Completed,
+            CancellationToken.None));
+        Assert.Equal(409, skipped.StatusCode);
+
+        var requesterStart = await Assert.ThrowsAsync<AppException>(() => appointments.UpdateStatusAsync(
+            seed.Requester.Id,
+            seed.Appointment.Id,
+            AppointmentStatus.InProgress,
+            CancellationToken.None));
+        Assert.Equal(403, requesterStart.StatusCode);
+
+        var started = await appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id,
+            seed.Appointment.Id,
+            AppointmentStatus.InProgress,
+            CancellationToken.None);
+        Assert.Equal(AppointmentStatus.InProgress, started.Status);
+        Assert.Equal(ServiceRequestStatus.InProgress, seed.Request.Status);
+
+        var requesterComplete = await Assert.ThrowsAsync<AppException>(() => appointments.UpdateStatusAsync(
+            seed.Requester.Id,
+            seed.Appointment.Id,
+            AppointmentStatus.Completed,
+            CancellationToken.None));
+        Assert.Equal(403, requesterComplete.StatusCode);
+
+        var completed = await appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id,
+            seed.Appointment.Id,
+            AppointmentStatus.Completed,
+            CancellationToken.None);
+        Assert.Equal(AppointmentStatus.Completed, completed.Status);
+        Assert.Equal(ServiceRequestStatus.Completed, seed.Request.Status);
+
+        var review = await reviews.CreateAsync(
+            seed.Requester.Id,
+            seed.Provider.Id,
+            new CreateReviewRequest(seed.Request.Id, ReviewType.Verified.ToString(), 5, "สอนดี"),
+            CancellationToken.None);
+        Assert.Equal(5, review.Rating);
+        Assert.Equal(seed.Request.Id, review.ServiceRequestId);
+    }
+
+    [Fact]
+    public async Task Start_and_complete_endpoints_follow_the_same_appointment_chain()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db, withPendingAppointment: true);
+        var notifications = TestDbFactory.NoopNotifications();
+        var appointments = new AppointmentAppService(
+            db,
+            notifications,
+            NullLogger<AppointmentAppService>.Instance);
+        var requests = new ServiceRequestAppService(
+            db,
+            notifications,
+            NullLogger<ServiceRequestAppService>.Instance);
+
+        var tooSoon = await Assert.ThrowsAsync<AppException>(() =>
+            requests.StartAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None));
+        Assert.Equal(409, tooSoon.StatusCode);
+
+        await appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id,
+            seed.Appointment!.Id,
+            AppointmentStatus.Confirmed,
+            CancellationToken.None);
+
+        await requests.StartAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None);
+        var appointment = await db.Appointments.SingleAsync(a => a.Id == seed.Appointment.Id);
+        Assert.Equal(AppointmentStatus.InProgress, appointment.Status);
+        Assert.Equal(ServiceRequestStatus.InProgress, seed.Request.Status);
+
+        var requester = await Assert.ThrowsAsync<AppException>(() =>
+            requests.CompleteAsync(seed.Requester.Id, seed.Request.Id, CancellationToken.None));
+        Assert.Equal(403, requester.StatusCode);
+
+        await requests.CompleteAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None);
+        appointment = await db.Appointments.SingleAsync(a => a.Id == seed.Appointment.Id);
+        Assert.Equal(AppointmentStatus.Completed, appointment.Status);
+        Assert.Equal(ServiceRequestStatus.Completed, seed.Request.Status);
     }
 }
