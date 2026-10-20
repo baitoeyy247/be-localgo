@@ -26,7 +26,7 @@ public static class NotificationMessageBuilder
                 serviceBlock,
                 string.IsNullOrWhiteSpace(GetStr(payload, "requestId"))
                     ? "/provider/requests"
-                    : $"/provider/requests/{GetStr(payload, "requestId")}"),
+                    : $"/provider/bid?requestId={GetStr(payload, "requestId")}"),
 
             NotificationEvents.NewBidReceived => (
                 "มีผู้เสนอราคาใหม่",
@@ -61,6 +61,11 @@ public static class NotificationMessageBuilder
                 "ประกาศหมดอายุแล้ว",
                 serviceBlock,
                 $"/requester/bids?requestId={GetStr(payload, "requestId")}"),
+
+            NotificationEvents.RequestCancelled => (
+                "งานถูกยกเลิก",
+                JoinLines(serviceBlock, "ผู้ประกาศยกเลิกงานนี้แล้ว"),
+                "/provider/requests"),
 
             NotificationEvents.ReviewReceived => (
                 "คุณได้รับรีวิวใหม่",

@@ -24,13 +24,15 @@ public sealed class MarketplaceFlowTests
             TestDbFactory.NoopNotifications(),
             NullLogger<ServiceRequestAppService>.Instance);
 
-        var items = await sut.ListMatchingForProviderAsync(
+        var inbox = await sut.ListMatchingForProviderAsync(
             seed.ProviderUser.Id,
             excludeSmokeTestData: false,
             includeOwnRequests: true,
             CancellationToken.None);
 
-        var row = Assert.Single(items, x => x.Id == seed.Request.Id);
+        Assert.False(inbox.ExcludesOwnRequests);
+        Assert.Contains(inbox.Areas, area => area.Name == "Main" && area.ServiceRadiusMeters == 8000);
+        var row = Assert.Single(inbox.Items, x => x.Id == seed.Request.Id);
         Assert.True(row.NeedsAppointmentConfirm);
         Assert.Equal(ServiceRequestStatus.Scheduled.ToString(), row.Status);
     }
@@ -45,13 +47,13 @@ public sealed class MarketplaceFlowTests
             TestDbFactory.NoopNotifications(),
             NullLogger<ServiceRequestAppService>.Instance);
 
-        var items = await sut.ListMatchingForProviderAsync(
+        var inbox = await sut.ListMatchingForProviderAsync(
             seed.ProviderUser.Id,
             excludeSmokeTestData: false,
             includeOwnRequests: true,
             CancellationToken.None);
 
-        var row = Assert.Single(items, x => x.Id == seed.Request.Id);
+        var row = Assert.Single(inbox.Items, x => x.Id == seed.Request.Id);
         Assert.True(row.NeedsAppointmentConfirm);
         Assert.Equal(ServiceRequestStatus.ProviderSelected.ToString(), row.Status);
     }

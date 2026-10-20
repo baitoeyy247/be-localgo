@@ -17,4 +17,20 @@ public sealed class AdminAppService(ILocalGoDbContext db)
             await db.ServiceRequests.CountAsync(r => r.Status == ServiceRequestStatus.Expired, cancellationToken),
             await db.NotificationLogs.CountAsync(n => n.Status == NotificationStatus.Pending, cancellationToken));
     }
+
+    /// <summary>Projects one row per user. Scalar columns avoid navigation joins that can repeat a person.</summary>
+    public async Task<IReadOnlyList<AdminUserDto>> ListUsersAsync(CancellationToken cancellationToken)
+    {
+        var rows = await db.Users.AsNoTracking()
+            .OrderByDescending(u => u.CreatedAt)
+            .Select(u => new AdminUserDto(
+                u.Id,
+                u.DisplayName,
+                u.LineUserId,
+                u.SystemRole.ToString()))
+            .Take(100)
+            .ToListAsync(cancellationToken);
+
+        return rows.DistinctBy(u => u.Id).ToList();
+    }
 }

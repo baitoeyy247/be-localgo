@@ -338,6 +338,20 @@ public sealed class ProviderMatchingController(
             cancellationToken));
     }
 
+    /// <summary>Deep link for a LINE notification: load the bid form, or explain why this user cannot bid.</summary>
+    [HttpGet("{requestId:guid}/bid-form")]
+    public async Task<IActionResult> BidForm(Guid requestId, CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        var access = await requests.GetBidFormAsync(userId, requestId, cancellationToken);
+        return Ok(new
+        {
+            allowed = access.Allowed,
+            reason = access.Reason,
+            request = access.Request is null ? null : mapper.Map<ServiceRequestResponseDto>(access.Request),
+        });
+    }
+
     /// <summary>Provider view of a specific request — shows request summary without other providers' bids.</summary>
     [HttpGet("{requestId:guid}")]
     public async Task<IActionResult> GetForProvider(Guid requestId, CancellationToken cancellationToken)
@@ -437,7 +451,7 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
 
     [HttpGet("users")]
     public async Task<IActionResult> Users(CancellationToken cancellationToken) =>
-        Ok(await db.Users.AsNoTracking().OrderByDescending(u => u.CreatedAt).Take(100).ToListAsync(cancellationToken));
+        Ok(await admin.ListUsersAsync(cancellationToken));
 
     [HttpGet("providers")]
     public async Task<IActionResult> Providers(CancellationToken cancellationToken) =>

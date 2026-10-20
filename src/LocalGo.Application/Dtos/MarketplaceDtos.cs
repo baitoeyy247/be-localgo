@@ -96,6 +96,19 @@ public sealed record BidDto(
     DateTime? AvailableAt,
     string Status);
 
+public sealed record ProviderCoverageAreaDto(string Name, int ServiceRadiusMeters);
+
+public sealed record ProviderMatchingInboxDto(
+    IReadOnlyList<ServiceRequestSummaryDto> Items,
+    bool ExcludesOwnRequests,
+    IReadOnlyList<ProviderCoverageAreaDto> Areas);
+
+public sealed record AdminUserDto(
+    Guid Id,
+    string DisplayName,
+    string LineUserId,
+    string SystemRole);
+
 public sealed record AdminDashboardDto(
     int Users,
     int Providers,

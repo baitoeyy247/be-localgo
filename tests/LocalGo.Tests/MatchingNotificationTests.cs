@@ -145,13 +145,66 @@ public sealed class MatchingNotificationTests
             includeOwnRequests: false,
             CancellationToken.None);
 
-        Assert.Contains(matching, x => x.Id == request.Id);
+        Assert.Contains(matching.Items, x => x.Id == request.Id);
+        Assert.True(matching.ExcludesOwnRequests);
+
+        var ownerForm = await sut.GetBidFormAsync(seed.Requester.Id, request.Id, CancellationToken.None);
+        Assert.False(ownerForm.Allowed);
+        Assert.Contains("โพสต์เอง", ownerForm.Reason);
+
+        var strangerForm = await sut.GetBidFormAsync(Guid.NewGuid(), request.Id, CancellationToken.None);
+        Assert.False(strangerForm.Allowed);
+        Assert.Contains("โปรไฟล์", strangerForm.Reason);
+
+        var farForm = await sut.GetBidFormAsync(seed.FarProviderUser.Id, request.Id, CancellationToken.None);
+        Assert.False(farForm.Allowed);
+        Assert.Contains("นอกพื้นที่", farForm.Reason);
+
+        var allowedForm = await sut.GetBidFormAsync(seed.MatchingProviderUser.Id, request.Id, CancellationToken.None);
+        Assert.True(allowedForm.Allowed);
+        Assert.NotNull(allowedForm.Request);
+
+        var missingForm = await sut.GetBidFormAsync(seed.MatchingProviderUser.Id, Guid.NewGuid(), CancellationToken.None);
+        Assert.False(missingForm.Allowed);
+        Assert.Equal("ไม่พบงานนี้", missingForm.Reason);
 
         await notifications.Received(1).EnqueueAsync(
             NotificationEvents.NewMatchingRequest,
             seed.MatchingProviderUser.Id,
             seed.MatchingProviderUser.LineUserId,
             Arg.Is<object>(p => PayloadContainsRequestId(p, request.Id)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CancelAsync_notifies_each_bidder_once()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db);
+        var notifications = Substitute.For<INotificationPublisher>();
+        notifications
+            .EnqueueAsync(
+                Arg.Any<string>(),
+                Arg.Any<Guid?>(),
+                Arg.Any<string?>(),
+                Arg.Any<object?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var sut = new ServiceRequestAppService(db, notifications, NullLogger<ServiceRequestAppService>.Instance);
+        await sut.CancelAsync(seed.Requester.Id, seed.Request.Id, CancellationToken.None);
+
+        await notifications.Received(1).EnqueueAsync(
+            NotificationEvents.RequestCancelled,
+            seed.ProviderUser.Id,
+            seed.ProviderUser.LineUserId,
+            Arg.Is<object>(p => PayloadContainsRequestId(p, seed.Request.Id)),
+            Arg.Any<CancellationToken>());
+        await notifications.DidNotReceive().EnqueueAsync(
+            NotificationEvents.RequestCancelled,
+            seed.Requester.Id,
+            Arg.Any<string?>(),
+            Arg.Any<object?>(),
             Arg.Any<CancellationToken>());
     }
 

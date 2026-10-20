@@ -138,19 +138,83 @@ public sealed class ServiceRequestAppService(
         return request;
     }
 
+    /// <summary>
+    /// Decides whether this user may open the bid form for a LINE deep link.
+    /// Does not return the request when access is denied.
+    /// </summary>
+    public async Task<BidFormAccess> GetBidFormAsync(
+        Guid userId, Guid requestId, CancellationToken cancellationToken)
+    {
+        var request = await db.ServiceRequests.AsNoTracking()
+            .Include(r => r.Bids).ThenInclude(b => b.Provider)
+            .Include(r => r.Category)
+            .FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken);
+
+        if (request is null)
+        {
+            return new BidFormAccess(false, "ไม่พบงานนี้", null);
+        }
+
+        if (request.RequesterUserId == userId)
+        {
+            return new BidFormAccess(false, "นี่คืองานที่คุณโพสต์เอง จึงเสนอราคาไม่ได้", null);
+        }
+
+        var provider = await db.Providers.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.OwnerUserId == userId, cancellationToken);
+        if (provider is null)
+        {
+            return new BidFormAccess(false, "สร้างโปรไฟล์ผู้ให้บริการก่อนจึงจะเสนอราคาได้", null);
+        }
+
+        if (provider.Status != ProviderStatus.Active)
+        {
+            return new BidFormAccess(false, "เปิดใช้งานโปรไฟล์ผู้ให้บริการก่อนจึงจะเสนอราคาได้", null);
+        }
+
+        var myBids = request.Bids
+            .Where(b => b.ProviderId == provider.Id && b.Status != BidStatus.Withdrawn)
+            .ToList();
+        var isSelected = request.SelectedProviderId == provider.Id;
+        var isOpen = request.Status is ServiceRequestStatus.Open or ServiceRequestStatus.HasOffers;
+        var canBid = request.Source == ServiceRequestSource.Marketplace && isOpen;
+
+        if (!canBid && myBids.Count == 0 && !isSelected)
+        {
+            return new BidFormAccess(false, "งานนี้ไม่เปิดรับข้อเสนอแล้ว", null);
+        }
+
+        if (canBid && myBids.Count == 0 && !isSelected)
+        {
+            var coverage = await LoadCoverageLinksAsync(provider.Id, cancellationToken);
+            if (NearestCoverageDistance(coverage, request) is null)
+            {
+                return new BidFormAccess(false, "งานนี้อยู่นอกพื้นที่ให้บริการของคุณ", null);
+            }
+        }
+        else if (!canBid)
+        {
+            return new BidFormAccess(false, "งานนี้ไม่เปิดรับข้อเสนอแล้ว", null);
+        }
+
+        request.Bids = myBids;
+        return new BidFormAccess(true, null, request);
+    }
+
     /// <summary>Lists open and active jobs matching the provider's service coverage.</summary>
-    public async Task<IReadOnlyList<ServiceRequestSummaryDto>> ListMatchingForProviderAsync(
+    public async Task<ProviderMatchingInboxDto> ListMatchingForProviderAsync(
         Guid userId,
         bool excludeSmokeTestData,
         bool includeOwnRequests,
         CancellationToken cancellationToken)
     {
+        var excludesOwnRequests = !includeOwnRequests;
         var provider = await db.Providers.AsNoTracking()
             .FirstOrDefaultAsync(p => p.OwnerUserId == userId && p.Status == ProviderStatus.Active, cancellationToken);
 
         if (provider is null)
         {
-            return [];
+            return new ProviderMatchingInboxDto([], excludesOwnRequests, []);
         }
 
         var coverageLinks = await LoadCoverageLinksAsync(provider.Id, cancellationToken);
@@ -180,20 +244,75 @@ public sealed class ServiceRequestAppService(
             seenIds,
             cancellationToken);
 
-        return results
+        var items = results
             .OrderByDescending(r => ProviderActiveEngagementStatuses.Any(s => s.ToString() == r.Status))
             .ThenByDescending(r => r.CreatedAt)
             .ThenBy(r => r.DistanceMeters)
             .ToList();
+
+        return new ProviderMatchingInboxDto(items, excludesOwnRequests, DistinctAreas(coverageLinks));
     }
 
-    /// <summary>Cancels a request owned by the current user.</summary>
+    /// <summary>Cancels a request owned by the current user and tells bidders.</summary>
     public async Task CancelAsync(Guid userId, Guid requestId, CancellationToken cancellationToken)
     {
         var entity = await MarketplaceAccess.RequireOwnedRequestAsync(db, userId, requestId, cancellationToken);
+        var providerIds = await db.Bids.AsNoTracking()
+            .Where(b => b.ServiceRequestId == requestId && b.Status != BidStatus.Withdrawn)
+            .Select(b => b.ProviderId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var owners = providerIds.Count == 0
+            ? []
+            : await db.Providers.AsNoTracking()
+                .Where(p => providerIds.Contains(p.Id))
+                .Join(
+                    db.Users.AsNoTracking(),
+                    p => p.OwnerUserId,
+                    u => u.Id,
+                    (_, u) => new { u.Id, u.LineUserId })
+                .ToListAsync(cancellationToken);
+
         entity.Status = ServiceRequestStatus.Cancelled;
         entity.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+
+        if (owners.Count == 0)
+        {
+            return;
+        }
+
+        var categoryName = await db.ServiceCategories.AsNoTracking()
+            .Where(c => c.Id == entity.CategoryId)
+            .Select(c => c.Name)
+            .FirstOrDefaultAsync(cancellationToken) ?? "";
+        var notified = new HashSet<Guid>();
+        foreach (var owner in owners)
+        {
+            if (!notified.Add(owner.Id))
+            {
+                continue;
+            }
+
+            await NotificationEnqueue.TryExcludingActorAsync(
+                logger,
+                notifications,
+                NotificationEvents.RequestCancelled,
+                owner.Id,
+                userId,
+                owner.LineUserId,
+                new
+                {
+                    requestId = entity.Id,
+                    title = entity.Title,
+                    categoryId = entity.CategoryId,
+                    categoryName,
+                },
+                cancellationToken,
+                "Request cancelled but notification enqueue failed. RequestId={RequestId} RecipientId={RecipientId}",
+                entity.Id,
+                owner.Id);
+        }
     }
 
     /// <summary>Marks a confirmed appointment's request as in progress. Provider only when an appointment exists.</summary>
@@ -683,5 +802,18 @@ public sealed class ServiceRequestAppService(
         }
     }
 
+    private static List<ProviderCoverageAreaDto> DistinctAreas(IReadOnlyList<CoverageLink> coverageLinks) =>
+        coverageLinks
+            .GroupBy(link => link.Branch.Id)
+            .Select(group =>
+            {
+                var branch = group.First().Branch;
+                return new ProviderCoverageAreaDto(branch.Name, branch.ServiceRadiusMeters);
+            })
+            .OrderBy(area => area.Name)
+            .ToList();
+
     private sealed record CoverageLink(Guid CategoryId, ProviderBranch Branch);
 }
+
+public sealed record BidFormAccess(bool Allowed, string? Reason, ServiceRequest? Request);

@@ -58,6 +58,8 @@ public sealed class NotificationMessageBuilderTests
             CancellationToken.None);
 
         Assert.Equal("มีงานใหม่ในพื้นที่ของคุณ", altText);
+        var linkJson = JsonSerializer.Serialize(message, JsonOpts);
+        Assert.Contains($"/provider/bid?requestId={requestId}", linkJson, StringComparison.Ordinal);
         var json = JsonSerializer.Serialize(message, JsonOpts);
         Assert.Contains("บริการ:", json, StringComparison.Ordinal);
         Assert.Contains("ซ่อมท่อรั่ว", json, StringComparison.Ordinal);
@@ -155,5 +157,28 @@ public sealed class NotificationMessageBuilderTests
 
         var json = JsonSerializer.Serialize(message, JsonOpts);
         Assert.Contains($"/provider/requests/{seed.Request.Id}", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_RequestCancelled_tells_the_provider_the_job_was_cancelled()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var payload = JsonDocument.Parse(
+            """
+            {"title":"ซ่อมท่อรั่ว","categoryName":"ช่างประปา","requestId":"00000000-0000-0000-0000-000000000099"}
+            """).RootElement;
+
+        var (altText, message) = await NotificationMessageBuilder.BuildAsync(
+            NotificationEvents.RequestCancelled,
+            payload,
+            "https://liff.example",
+            db,
+            null,
+            CancellationToken.None);
+
+        Assert.Equal("งานถูกยกเลิก", altText);
+        var json = JsonSerializer.Serialize(message, JsonOpts);
+        Assert.Contains("ผู้ประกาศยกเลิกงานนี้แล้ว", json, StringComparison.Ordinal);
+        Assert.Contains("/provider/requests", json, StringComparison.Ordinal);
     }
 }

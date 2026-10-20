@@ -10,5 +10,6 @@ public static class NotificationEvents
     public const string AppointmentUpdated = "AppointmentUpdated";
     public const string RequestExpiringSoon = "RequestExpiringSoon";
     public const string RequestExpired = "RequestExpired";
+    public const string RequestCancelled = "RequestCancelled";
     public const string ReviewReceived = "ReviewReceived";
 }
