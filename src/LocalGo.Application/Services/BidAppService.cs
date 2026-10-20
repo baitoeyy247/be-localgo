@@ -14,6 +14,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
     /// <summary>Submits or re-submits a provider bid on an open marketplace request.</summary>
     public async Task<Bid> SubmitAsync(Guid userId, Guid requestId, SubmitBidRequest request, CancellationToken cancellationToken)
     {
+        var price = NormalizeBid(request);
         var provider = await MarketplaceAccess.RequireProviderForUserAsync(db, userId, cancellationToken);
 
         var serviceRequest = await db.ServiceRequests.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
@@ -25,7 +26,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         }
 
         var now = DateTime.UtcNow;
-        var bid = await ResolveBidForSubmitAsync(provider.Id, requestId, request, now, cancellationToken);
+        var bid = await ResolveBidForSubmitAsync(provider.Id, requestId, request, price, now, cancellationToken);
 
         MarkRequestAfterBid(serviceRequest, now);
         try
@@ -37,7 +38,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
             // Stale read or race: unique (request, provider) — reload and update instead of insert.
             db.ClearChangeTracker();
             serviceRequest = await db.ServiceRequests.FirstAsync(r => r.Id == requestId, cancellationToken);
-            bid = await ResolveBidForSubmitAsync(provider.Id, requestId, request, now, cancellationToken);
+            bid = await ResolveBidForSubmitAsync(provider.Id, requestId, request, price, now, cancellationToken);
             MarkRequestAfterBid(serviceRequest, now);
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -190,7 +191,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
             throw new AppException("Cannot update bid after selection.", 409);
         }
 
-        ApplyEditableBidFields(bid, request, DateTime.UtcNow);
+        ApplyEditableBidFields(bid, request, NormalizeBid(request), DateTime.UtcNow);
         await db.SaveChangesAsync(cancellationToken);
         return bid;
     }
@@ -229,13 +230,56 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
 
         bid.Status = BidStatus.Withdrawn;
         bid.UpdatedAt = DateTime.UtcNow;
+        var serviceRequest = await db.ServiceRequests
+            .FirstOrDefaultAsync(r => r.Id == bid.ServiceRequestId, cancellationToken);
+        if (serviceRequest is not null
+            && serviceRequest.Source == ServiceRequestSource.Marketplace
+            && serviceRequest.Status == ServiceRequestStatus.HasOffers)
+        {
+            var otherActiveBids = await db.Bids.AnyAsync(
+                b => b.ServiceRequestId == bid.ServiceRequestId
+                    && b.Id != bid.Id
+                    && b.Status != BidStatus.Withdrawn
+                    && b.Status != BidStatus.Rejected,
+                cancellationToken);
+            if (!otherActiveBids)
+            {
+                serviceRequest.Status = ServiceRequestStatus.Open;
+                serviceRequest.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ProviderBidListItemDto>> ListMineAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var provider = await MarketplaceAccess.RequireProviderForUserAsync(db, userId, cancellationToken);
+        return await db.Bids.AsNoTracking()
+            .Where(b => b.ProviderId == provider.Id)
+            .OrderByDescending(b => b.CreatedAt)
+            .Select(b => new ProviderBidListItemDto(
+                b.Id,
+                b.ServiceRequestId,
+                b.ServiceRequest.Title,
+                b.PriceText,
+                b.Status.ToString(),
+                b.CreatedAt))
+            .Take(100)
+            .ToListAsync(cancellationToken);
+    }
+
+    private static int NormalizeBid(SubmitBidRequest request)
+    {
+        FieldRules.RequireBidDescription(request.Description);
+        return FieldRules.RequireBidPrice(request.PriceText, request.Amount);
     }
 
     private async Task<Bid> ResolveBidForSubmitAsync(
         Guid providerId,
         Guid requestId,
         SubmitBidRequest request,
+        int price,
         DateTime now,
         CancellationToken cancellationToken)
     {
@@ -245,7 +289,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
 
         if (existing is not null)
         {
-            ApplySubmitToExistingBid(existing, request, now);
+            ApplySubmitToExistingBid(existing, request, price, now);
             return existing;
         }
 
@@ -254,9 +298,9 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
             Id = Guid.NewGuid(),
             ServiceRequestId = requestId,
             ProviderId = providerId,
-            Amount = request.Amount,
+            Amount = price,
             Currency = request.Currency ?? "THB",
-            PriceText = request.PriceText.Trim(),
+            PriceText = price.ToString(System.Globalization.CultureInfo.InvariantCulture),
             Description = request.Description,
             AvailableAt = request.AvailableAt,
             Status = BidStatus.Submitted,
@@ -290,13 +334,10 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         ProgressHelper.Touch(serviceRequest);
     }
 
-    private static void ApplyEditableBidFields(Bid bid, SubmitBidRequest request, DateTime now)
+    private static void ApplyEditableBidFields(Bid bid, SubmitBidRequest request, int price, DateTime now)
     {
-        bid.PriceText = request.PriceText.Trim();
-        if (request.Amount.HasValue)
-        {
-            bid.Amount = request.Amount;
-        }
+        bid.PriceText = price.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        bid.Amount = price;
 
         if (request.Description is not null)
         {
@@ -311,14 +352,14 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         bid.UpdatedAt = now;
     }
 
-    private static void ApplySubmitToExistingBid(Bid existing, SubmitBidRequest request, DateTime now)
+    private static void ApplySubmitToExistingBid(Bid existing, SubmitBidRequest request, int price, DateTime now)
     {
         switch (existing.Status)
         {
             case BidStatus.Submitted:
                 throw new AppException("คุณส่งข้อเสนอราคางานนี้แล้ว — ใช้ปุ่มอัปเดตข้อเสนอแทน", 409);
             case BidStatus.Withdrawn:
-                ApplyEditableBidFields(existing, request, now);
+                ApplyEditableBidFields(existing, request, price, now);
                 if (!string.IsNullOrWhiteSpace(request.Currency))
                 {
                     existing.Currency = request.Currency;

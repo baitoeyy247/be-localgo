@@ -2,6 +2,7 @@ using LocalGo.Application.Abstractions.Notifications;
 using LocalGo.Application.Dtos;
 using LocalGo.Application.Services;
 using LocalGo.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
@@ -156,9 +157,22 @@ public sealed class MatchingNotificationTests
         Assert.False(strangerForm.Allowed);
         Assert.Contains("โปรไฟล์", strangerForm.Reason);
 
+        var farList = await sut.ListMatchingForProviderAsync(
+            seed.FarProviderUser.Id,
+            excludeSmokeTestData: false,
+            includeOwnRequests: false,
+            CancellationToken.None);
+        Assert.DoesNotContain(farList.Items, x => x.Id == request.Id);
+
         var farForm = await sut.GetBidFormAsync(seed.FarProviderUser.Id, request.Id, CancellationToken.None);
         Assert.False(farForm.Allowed);
+        Assert.Equal("OUT_OF_RANGE", farForm.ReasonCode);
         Assert.Contains("นอกพื้นที่", farForm.Reason);
+
+        var wrongCategory = await sut.GetBidFormAsync(seed.WrongCategoryProviderUser.Id, request.Id, CancellationToken.None);
+        Assert.False(wrongCategory.Allowed);
+        Assert.Equal("CATEGORY_MISMATCH", wrongCategory.ReasonCode);
+        Assert.DoesNotContain("นอกพื้นที่", wrongCategory.Reason ?? "");
 
         var allowedForm = await sut.GetBidFormAsync(seed.MatchingProviderUser.Id, request.Id, CancellationToken.None);
         Assert.True(allowedForm.Allowed);
@@ -206,6 +220,42 @@ public sealed class MatchingNotificationTests
             Arg.Any<string?>(),
             Arg.Any<object?>(),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Bid_form_explains_paused_service_and_disabled_area()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedOpenMatchingNotificationAsync(db);
+        var sut = new ServiceRequestAppService(db, TestDbFactory.NoopNotifications(), NullLogger<ServiceRequestAppService>.Instance);
+        var request = await sut.CreateAsync(
+            seed.Requester.Id,
+            new CreateServiceRequestDto(
+                seed.Category.Id,
+                "Paused or disabled",
+                null,
+                "Bangkok",
+                seed.RequestLatitude,
+                seed.RequestLongitude,
+                seed.SearchRadiusMeters,
+                DateTime.UtcNow.AddDays(1),
+                null,
+                "เปิดรับราคา",
+                Publish: true),
+            CancellationToken.None);
+
+        var service = await db.ProviderServices.FirstAsync(s => s.ProviderId == seed.MatchingProvider.Id);
+        service.IsActive = false;
+        await db.SaveChangesAsync();
+        var paused = await sut.GetBidFormAsync(seed.MatchingProviderUser.Id, request.Id, CancellationToken.None);
+        Assert.Equal("SERVICE_PAUSED", paused.ReasonCode);
+
+        service.IsActive = true;
+        var branch = await db.ProviderBranches.FirstAsync(b => b.ProviderId == seed.MatchingProvider.Id);
+        branch.IsActive = false;
+        await db.SaveChangesAsync();
+        var disabled = await sut.GetBidFormAsync(seed.MatchingProviderUser.Id, request.Id, CancellationToken.None);
+        Assert.Equal("AREA_DISABLED", disabled.ReasonCode);
     }
 
     private static bool PayloadContainsRequestId(object payload, Guid requestId)

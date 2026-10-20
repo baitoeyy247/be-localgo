@@ -10,7 +10,7 @@ namespace LocalGo.Application.Services;
 
 public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublisher notifications)
 {
-    public async Task<Review> CreateAsync(Guid userId, Guid providerId, CreateReviewRequest request, CancellationToken cancellationToken)
+    public async Task<ReviewCreatedDto> CreateAsync(Guid userId, Guid providerId, CreateReviewRequest request, CancellationToken cancellationToken)
     {
         if (!Enum.TryParse<ReviewType>(request.ReviewType, true, out var reviewType))
         {
@@ -21,6 +21,8 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
         {
             throw new AppException("Rating must be 1-5.", 400);
         }
+
+        FieldRules.RequireReviewComment(request.Comment);
 
         var provider = await db.Providers.FirstOrDefaultAsync(p => p.Id == providerId, cancellationToken)
             ?? throw new AppException("Provider not found.", 404);
@@ -40,6 +42,19 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
             }
         }
 
+        if (request.ServiceRequestId is Guid serviceRequestId
+            && await db.Reviews.AnyAsync(
+                r => r.ServiceRequestId == serviceRequestId && r.ReviewerUserId == userId,
+                cancellationToken))
+        {
+            throw new AppException("คุณรีวิวงานนี้แล้ว", 409);
+        }
+
+        var reviewerName = await db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => u.DisplayName)
+            .FirstOrDefaultAsync(cancellationToken) ?? "";
+
         var now = DateTime.UtcNow;
         var review = new Review
         {
@@ -49,7 +64,7 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
             ServiceRequestId = request.ServiceRequestId,
             ReviewType = reviewType,
             Rating = request.Rating,
-            Comment = request.Comment,
+            Comment = string.IsNullOrWhiteSpace(request.Comment) ? null : request.Comment.Trim(),
             Status = ReviewStatus.Published,
             CreatedAt = now,
             UpdatedAt = now,
@@ -57,7 +72,14 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
 
         db.Reviews.Add(review);
         await RecalculateProviderRatingsAsync(provider, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException) when (request.ServiceRequestId is not null)
+        {
+            throw new AppException("คุณรีวิวงานนี้แล้ว", 409);
+        }
 
         var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == provider.OwnerUserId, cancellationToken);
         if (owner is not null && NotificationRecipients.ShouldNotify(owner.Id, userId))
@@ -76,11 +98,29 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
                 cancellationToken);
         }
 
-        return review;
+        return new ReviewCreatedDto(
+            review.Id,
+            review.Rating,
+            review.Comment,
+            review.ReviewType.ToString(),
+            review.CreatedAt,
+            reviewerName,
+            review.ServiceRequestId);
     }
+
+    public async Task<Review?> FindMineAsync(
+        Guid userId, Guid providerId, Guid serviceRequestId, CancellationToken cancellationToken) =>
+        await db.Reviews.AsNoTracking()
+            .Include(r => r.ReviewerUser)
+            .FirstOrDefaultAsync(
+                r => r.ProviderId == providerId
+                    && r.ReviewerUserId == userId
+                    && r.ServiceRequestId == serviceRequestId,
+                cancellationToken);
 
     public async Task<IReadOnlyList<Review>> ListForProviderAsync(Guid providerId, CancellationToken cancellationToken) =>
         await db.Reviews.AsNoTracking()
+            .Include(r => r.ReviewerUser)
             .Where(r => r.ProviderId == providerId && r.Status == ReviewStatus.Published)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(cancellationToken);

@@ -109,11 +109,74 @@ public static class FieldRules
 
     public static void RequirePrice(string? price)
     {
-        if (string.IsNullOrWhiteSpace(price) || !IsPriceText(price))
+        if (string.IsNullOrWhiteSpace(price))
+        {
+            throw new AppException("กรุณากรอกราคา", 400);
+        }
+
+        var trimmed = NormalizePrice(price);
+        if (trimmed.Contains('.') || trimmed.Contains(','))
+        {
+            throw new AppException("ราคาต้องเป็นจำนวนเต็ม", 400);
+        }
+
+        var parts = trimmed.Split(["-", "–", "—", "ถึง"], StringSplitOptions.None);
+        if (parts.Length == 2
+            && int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var low)
+            && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var high)
+            && low > high)
+        {
+            throw new AppException("ราคาต่ำสุดต้องไม่มากกว่าราคาสูงสุด", 400);
+        }
+
+        if (!IsPriceText(price))
         {
             throw new AppException("ราคาต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 1000000 หรือช่วงราคาที่ต่ำไม่เกินสูง เช่น 40 หรือ 40-80", 400);
         }
     }
+
+    /// <summary>Bid prices are a single integer baht amount, not a range.</summary>
+    public static int RequireBidPrice(string? priceText, decimal? amount)
+    {
+        var trimmed = NormalizePrice(priceText ?? "");
+        if (trimmed.Contains('.') || trimmed.Contains(','))
+        {
+            throw new AppException("ราคาต้องเป็นจำนวนเต็ม", 400);
+        }
+
+        if (!int.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            || parsed < BudgetMin
+            || parsed > BudgetMax)
+        {
+            throw new AppException("ราคาต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 1000000", 400);
+        }
+
+        if (amount is decimal value && value != parsed)
+        {
+            throw new AppException("ราคาต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 1000000", 400);
+        }
+
+        return parsed;
+    }
+
+    public static void RequireBidDescription(string? description)
+    {
+        if (description is not null && description.Trim().Length > 2000)
+        {
+            throw new AppException("รายละเอียดข้อเสนอต้องไม่เกิน 2000 ตัวอักษร", 400);
+        }
+    }
+
+    public static void RequireReviewComment(string? comment)
+    {
+        if (comment is not null && comment.Trim().Length > 2000)
+        {
+            throw new AppException("ความคิดเห็นต้องไม่เกิน 2000 ตัวอักษร", 400);
+        }
+    }
+
+    private static string NormalizePrice(string price) =>
+        price.Trim().Replace("บาท", "", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal);
 
     public static bool IsPriceText(string price)
     {

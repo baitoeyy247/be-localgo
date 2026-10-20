@@ -9,6 +9,8 @@ public sealed class ReviewProfile : Profile
     public ReviewProfile()
     {
         CreateMap<Review, ReviewResponseDto>()
-            .ForMember(dest => dest.ReviewType, opt => opt.MapFrom(src => MappingHelpers.EnumToString(src.ReviewType)));
+            .ForMember(dest => dest.ReviewType, opt => opt.MapFrom(src => MappingHelpers.EnumToString(src.ReviewType)))
+            .ForMember(dest => dest.ReviewerDisplayName, opt => opt.MapFrom(src => src.ReviewerUser != null ? src.ReviewerUser.DisplayName : null))
+            .ForMember(dest => dest.ServiceRequestId, opt => opt.MapFrom(src => src.ServiceRequestId));
     }
 }

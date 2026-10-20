@@ -85,7 +85,25 @@ public sealed record ServiceRequestSummaryDto(
     string? BudgetText = null,
     double? DistanceMeters = null,
     bool AlreadyBidByMe = false,
-    bool NeedsAppointmentConfirm = false);
+    bool NeedsAppointmentConfirm = false,
+    bool IsOwnRequest = false);
+
+public sealed record ProviderBidListItemDto(
+    Guid Id,
+    Guid ServiceRequestId,
+    string RequestTitle,
+    string PriceText,
+    string Status,
+    DateTime CreatedAt);
+
+public sealed record ReviewCreatedDto(
+    Guid Id,
+    int Rating,
+    string? Comment,
+    string ReviewType,
+    DateTime CreatedAt,
+    string ReviewerDisplayName,
+    Guid? ServiceRequestId);
 
 public sealed record BidDto(
     Guid Id,

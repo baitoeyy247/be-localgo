@@ -76,6 +76,34 @@ public sealed class FieldRulesTests
     }
 
     [Fact]
+    public void Price_explains_decimals_and_inverted_ranges()
+    {
+        var fraction = Assert.Throws<AppException>(() => FieldRules.RequirePrice("1.5"));
+        Assert.Equal("ราคาต้องเป็นจำนวนเต็ม", fraction.Message);
+        var inverted = Assert.Throws<AppException>(() => FieldRules.RequirePrice("80-40"));
+        Assert.Equal("ราคาต่ำสุดต้องไม่มากกว่าราคาสูงสุด", inverted.Message);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    [InlineData("abc")]
+    [InlineData("1.5")]
+    [InlineData("1000001")]
+    public void Bid_price_rejects_invalid_values(string price)
+    {
+        var ex = Assert.Throws<AppException>(() => FieldRules.RequireBidPrice(price, null));
+        Assert.Equal(400, ex.StatusCode);
+    }
+
+    [Fact]
+    public void Bid_price_accepts_150()
+    {
+        Assert.Equal(150, FieldRules.RequireBidPrice("150", null));
+        Assert.Equal(150, FieldRules.RequireBidPrice("150 บาท", 150));
+    }
+
+    [Fact]
     public void Preferred_time_accepts_a_future_start_and_later_end()
     {
         var now = new DateTime(2026, 10, 21, 3, 0, 0, DateTimeKind.Utc);

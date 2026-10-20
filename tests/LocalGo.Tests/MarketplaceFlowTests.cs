@@ -204,6 +204,16 @@ public sealed class MarketplaceFlowTests
             CancellationToken.None);
         Assert.Equal(5, review.Rating);
         Assert.Equal(seed.Request.Id, review.ServiceRequestId);
+        Assert.Equal("Test Requester", review.ReviewerDisplayName);
+
+        var duplicate = await Assert.ThrowsAsync<AppException>(() => reviews.CreateAsync(
+            seed.Requester.Id,
+            seed.Provider.Id,
+            new CreateReviewRequest(seed.Request.Id, ReviewType.Verified.ToString(), 4, "ซ้ำ"),
+            CancellationToken.None));
+        Assert.Equal(409, duplicate.StatusCode);
+        Assert.Equal("คุณรีวิวงานนี้แล้ว", duplicate.Message);
+        Assert.Equal(1, await db.Reviews.CountAsync(r => r.ServiceRequestId == seed.Request.Id));
     }
 
     [Fact]

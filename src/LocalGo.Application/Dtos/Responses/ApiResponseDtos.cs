@@ -79,8 +79,8 @@ public sealed class ProviderResponseDto
     public required string ProviderType { get; init; }
     public required string Name { get; init; }
     public string? Description { get; init; }
-    public string? ContactLineId { get; init; }
-    public string? ContactPhone { get; init; }
+    public string? ContactLineId { get; set; }
+    public string? ContactPhone { get; set; }
     public string? ContactUrl { get; init; }
     public required string Status { get; init; }
     public decimal AverageVerifiedRating { get; init; }
@@ -98,6 +98,8 @@ public sealed class ReviewResponseDto
     public string? Comment { get; init; }
     public required string ReviewType { get; init; }
     public DateTime CreatedAt { get; init; }
+    public string? ReviewerDisplayName { get; init; }
+    public Guid? ServiceRequestId { get; init; }
 }
 
 public sealed class AppointmentResponseDto

@@ -258,6 +258,29 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>Phone and LINE are visible to the owner, and to a requester after the appointment is confirmed.</summary>
+    public async Task<bool> ViewerMaySeeContactAsync(Guid? viewerUserId, Guid providerId, CancellationToken cancellationToken)
+    {
+        if (viewerUserId is null)
+        {
+            return false;
+        }
+
+        var isOwner = await db.Providers.AsNoTracking()
+            .AnyAsync(p => p.Id == providerId && p.OwnerUserId == viewerUserId, cancellationToken);
+        if (isOwner)
+        {
+            return true;
+        }
+
+        return await db.Appointments.AsNoTracking().AnyAsync(
+            a => a.ProviderId == providerId
+                && a.RequesterUserId == viewerUserId
+                && a.Status != AppointmentStatus.Pending
+                && a.Status != AppointmentStatus.Cancelled,
+            cancellationToken);
+    }
+
     private async Task<Provider> RequireOwnedProviderAsync(Guid userId, Guid providerId, CancellationToken cancellationToken)
     {
         var provider = await db.Providers.Include(p => p.Branches).FirstOrDefaultAsync(

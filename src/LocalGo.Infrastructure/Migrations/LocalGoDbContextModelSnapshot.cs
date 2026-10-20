@@ -511,7 +511,9 @@ namespace LocalGo.Infrastructure.Migrations
 
                     b.HasIndex("ReviewerUserId");
 
-                    b.HasIndex("ServiceRequestId");
+                    b.HasIndex("ServiceRequestId", "ReviewerUserId")
+                        .IsUnique()
+                        .HasFilter("\"ServiceRequestId\" IS NOT NULL");
 
                     b.ToTable("reviews", (string)null);
                 });

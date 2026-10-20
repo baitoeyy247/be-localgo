@@ -120,17 +120,32 @@ public sealed class ServiceRequestAppService(
     public async Task<IReadOnlyList<ServiceRequestSummaryDto>> ListMineAsync(
         Guid userId, CancellationToken cancellationToken)
     {
-        return await db.ServiceRequests.AsNoTracking()
+        var rows = await db.ServiceRequests.AsNoTracking()
             .Where(r => r.RequesterUserId == userId)
             .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new
+            {
+                r.Id,
+                r.Title,
+                r.Status,
+                r.Source,
+                CategoryName = r.Category.Name,
+                r.CreatedAt,
+                BidCount = r.Bids.Count(b => b.Status != BidStatus.Withdrawn && b.Status != BidStatus.Rejected),
+                r.BudgetText,
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows
             .Select(r => new ServiceRequestSummaryDto(
                 r.Id,
                 r.Title,
-                r.Status.ToString(),
-                r.Category.Name,
+                DisplayStatus(r.Status, r.Source, r.BidCount),
+                r.CategoryName,
                 r.CreatedAt,
-                r.Bids.Count))
-            .ToListAsync(cancellationToken);
+                r.BidCount,
+                r.BudgetText))
+            .ToList();
     }
 
     /// <summary>Returns request detail when the viewer is allowed to see it; otherwise null.</summary>
@@ -219,7 +234,8 @@ public sealed class ServiceRequestAppService(
             var coverage = await LoadCoverageLinksAsync(provider.Id, cancellationToken);
             if (NearestCoverageDistance(coverage, request) is null)
             {
-                return new BidFormAccess(false, "งานนี้อยู่นอกพื้นที่ให้บริการของคุณ", null);
+                var (code, message) = await ExplainCoverageDenialAsync(provider.Id, request, cancellationToken);
+                return new BidFormAccess(false, message, null, code);
             }
         }
         else if (!canBid)
@@ -630,12 +646,14 @@ public sealed class ServiceRequestAppService(
         HashSet<Guid> seenIds,
         CancellationToken cancellationToken)
     {
+        var categoryIds = coverageLinks.Select(c => c.CategoryId).Distinct().ToArray();
         var openQuery = db.ServiceRequests.AsNoTracking()
             .Include(r => r.Category)
             .Include(r => r.Bids)
             .Where(r =>
                 r.Source == ServiceRequestSource.Marketplace
                 && OpenMatchingStatuses.Contains(r.Status)
+                && categoryIds.Contains(r.CategoryId)
                 && (includeOwnRequests || r.RequesterUserId != userId));
 
         if (excludeSmokeTestData)
@@ -654,7 +672,7 @@ public sealed class ServiceRequestAppService(
             }
 
             seenIds.Add(request.Id);
-            results.Add(ToSummary(request, provider.Id, distance));
+            results.Add(ToSummary(request, provider.Id, userId, distance));
         }
     }
 
@@ -707,12 +725,17 @@ public sealed class ServiceRequestAppService(
             double? distance = null;
             if (coverageLinks.Count > 0)
             {
-                distance = MinCategoryDistance(coverageLinks, request);
+                distance = NearestCoverageDistance(coverageLinks, request);
+                if (distance is null)
+                {
+                    continue;
+                }
             }
 
             results.Add(ToSummary(
                 request,
                 provider.Id,
+                userId,
                 distance,
                 pendingConfirmRequestIds.Contains(request.Id)));
         }
@@ -734,19 +757,10 @@ public sealed class ServiceRequestAppService(
         return nearest?.Distance;
     }
 
-    private static double? MinCategoryDistance(IReadOnlyList<CoverageLink> coverageLinks, ServiceRequest request)
-    {
-        var distances = coverageLinks
-            .Where(c => c.CategoryId == request.CategoryId)
-            .Select(c => GeoHelper.DistanceMeters(c.Branch.Location, request.Location))
-            .ToList();
-
-        return distances.Count > 0 ? distances.Min() : null;
-    }
-
     private static ServiceRequestSummaryDto ToSummary(
         ServiceRequest request,
         Guid providerId,
+        Guid viewerUserId,
         double? distanceMeters,
         bool needsAppointmentConfirm = false)
     {
@@ -764,7 +778,56 @@ public sealed class ServiceRequestAppService(
             request.BudgetText,
             distanceMeters,
             alreadyBid,
-            needsAppointmentConfirm);
+            needsAppointmentConfirm,
+            request.RequesterUserId == viewerUserId);
+    }
+
+    private static string DisplayStatus(
+        ServiceRequestStatus status,
+        ServiceRequestSource source,
+        int activeBidCount)
+    {
+        if (source == ServiceRequestSource.Marketplace
+            && activeBidCount == 0
+            && status is ServiceRequestStatus.HasOffers
+                or ServiceRequestStatus.ProviderSelected
+                or ServiceRequestStatus.Scheduled)
+        {
+            return ServiceRequestStatus.Open.ToString();
+        }
+
+        return status.ToString();
+    }
+
+    private async Task<(string Code, string Message)> ExplainCoverageDenialAsync(
+        Guid providerId,
+        ServiceRequest request,
+        CancellationToken cancellationToken)
+    {
+        var services = await db.ProviderServices.AsNoTracking()
+            .Where(s => s.ProviderId == providerId && s.CategoryId == request.CategoryId)
+            .Select(s => s.IsActive)
+            .ToListAsync(cancellationToken);
+        if (services.Count == 0)
+        {
+            return ("CATEGORY_MISMATCH", "งานนี้ไม่ตรงกับหมวดบริการที่คุณเปิดอยู่");
+        }
+
+        if (services.All(active => !active))
+        {
+            return ("SERVICE_PAUSED", "บริการในหมวดนี้อยู่ในสถานะหยุดชั่วคราว");
+        }
+
+        var branches = await db.ProviderBranches.AsNoTracking()
+            .Where(b => b.ProviderId == providerId)
+            .Select(b => b.IsActive)
+            .ToListAsync(cancellationToken);
+        if (branches.Count == 0 || branches.All(active => !active))
+        {
+            return ("AREA_DISABLED", "พื้นที่ให้บริการถูกปิดใช้งาน");
+        }
+
+        return ("OUT_OF_RANGE", "งานนี้อยู่นอกพื้นที่ให้บริการของคุณ");
     }
 
     private async Task NotifyMatchingProvidersAsync(ServiceRequest request, CancellationToken cancellationToken)
@@ -846,4 +909,4 @@ public sealed class ServiceRequestAppService(
     private sealed record CoverageLink(Guid CategoryId, ProviderBranch Branch);
 }
 
-public sealed record BidFormAccess(bool Allowed, string? Reason, ServiceRequest? Request);
+public sealed record BidFormAccess(bool Allowed, string? Reason, ServiceRequest? Request, string? ReasonCode = null);

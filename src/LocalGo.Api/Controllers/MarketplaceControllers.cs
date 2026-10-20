@@ -38,7 +38,19 @@ public sealed class ProvidersController(ICurrentUserService currentUser, Provide
     public async Task<IActionResult> GetPublic(Guid providerId, CancellationToken cancellationToken)
     {
         var provider = await providers.GetPublicAsync(providerId, cancellationToken);
-        return provider is null ? NotFound() : Ok(mapper.Map<ProviderResponseDto>(provider));
+        if (provider is null)
+        {
+            return NotFound();
+        }
+
+        var dto = mapper.Map<ProviderResponseDto>(provider);
+        if (!await providers.ViewerMaySeeContactAsync(currentUser.UserId, providerId, cancellationToken))
+        {
+            dto.ContactLineId = null;
+            dto.ContactPhone = null;
+        }
+
+        return Ok(dto);
     }
 
     [HttpPost("{providerId:guid}/services/{serviceId:guid}/book")]
@@ -356,6 +368,7 @@ public sealed class ProviderMatchingController(
         {
             allowed = access.Allowed,
             reason = access.Reason,
+            reasonCode = access.ReasonCode,
             request = access.Request is null ? null : mapper.Map<ServiceRequestResponseDto>(access.Request),
         });
     }
@@ -382,6 +395,13 @@ public sealed class BidsController(ICurrentUserService currentUser, BidAppServic
         var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
         var bid = await bids.UpdateAsync(userId, bidId, request, cancellationToken);
         return Ok(mapper.Map<BidResponseDto>(bid));
+    }
+
+    [HttpGet("/api/provider/bids")]
+    public async Task<IActionResult> Mine(CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        return Ok(await bids.ListMineAsync(userId, cancellationToken));
     }
 
     [HttpPost("{bidId:guid}/withdraw")]
@@ -422,7 +442,26 @@ public sealed class ReviewsController(ReviewAppService reviews, IMapper mapper) 
         Guid providerId, [FromBody] CreateReviewRequest request, ICurrentUserService currentUser, CancellationToken cancellationToken)
     {
         var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
-        return Ok(await reviews.CreateAsync(userId, providerId, request, cancellationToken));
+        var created = await reviews.CreateAsync(userId, providerId, request, cancellationToken);
+        return Created($"/api/providers/{providerId}/reviews/{created.Id}", new ReviewResponseDto
+        {
+            Id = created.Id,
+            Rating = created.Rating,
+            Comment = created.Comment,
+            ReviewType = created.ReviewType,
+            CreatedAt = created.CreatedAt,
+            ReviewerDisplayName = created.ReviewerDisplayName,
+            ServiceRequestId = created.ServiceRequestId,
+        });
+    }
+
+    [HttpGet("mine")]
+    [Authorize]
+    public async Task<IActionResult> Mine(Guid providerId, [FromQuery] Guid serviceRequestId, ICurrentUserService currentUser, CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        var review = await reviews.FindMineAsync(userId, providerId, serviceRequestId, cancellationToken);
+        return review is null ? NotFound() : Ok(mapper.Map<ReviewResponseDto>(review));
     }
 
     [HttpGet]
