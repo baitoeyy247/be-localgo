@@ -5,6 +5,7 @@ using LocalGo.Application.Dtos;
 using LocalGo.Domain.Entities;
 using LocalGo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace LocalGo.Application.Services;
@@ -12,7 +13,8 @@ namespace LocalGo.Application.Services;
 public sealed class ServiceRequestAppService(
     ILocalGoDbContext db,
     INotificationPublisher notifications,
-    ILogger<ServiceRequestAppService> logger)
+    ILogger<ServiceRequestAppService> logger,
+    IBackgroundWork? background = null)
 {
     /// <summary>Title used by scripts/smoke-api.sh — excluded from dev matching lists when requested.</summary>
     public const string SmokeTestRequestTitle = "Smoke test request";
@@ -32,10 +34,7 @@ public sealed class ServiceRequestAppService(
     public async Task<ServiceRequest> CreateAsync(Guid userId, CreateServiceRequestDto request, CancellationToken cancellationToken)
     {
         FieldRules.RequireBudget(request.BudgetText);
-        if (string.IsNullOrWhiteSpace(request.Title))
-        {
-            throw new AppException("กรุณากรอกหัวข้องาน", 400);
-        }
+        FieldRules.RequireRequestText(request.Title, request.Description);
 
         var now = DateTime.UtcNow;
         var entity = new ServiceRequest
@@ -64,7 +63,7 @@ public sealed class ServiceRequestAppService(
 
         if (request.Publish)
         {
-            await NotifyMatchingProvidersAsync(entity, cancellationToken);
+            await QueueMatchingNotificationsAsync(entity.Id, cancellationToken);
         }
 
         return entity;
@@ -82,8 +81,36 @@ public sealed class ServiceRequestAppService(
         entity.Status = ServiceRequestStatus.Open;
         ProgressHelper.Touch(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await NotifyMatchingProvidersAsync(entity, cancellationToken);
+        await QueueMatchingNotificationsAsync(entity.Id, cancellationToken);
         return entity;
+    }
+
+    /// <summary>Notifies matching providers for a request that was already saved.</summary>
+    public async Task NotifyMatchingProvidersByIdAsync(Guid requestId, CancellationToken cancellationToken)
+    {
+        var request = await db.ServiceRequests.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken);
+        if (request is null)
+        {
+            return;
+        }
+
+        await NotifyMatchingProvidersAsync(request, cancellationToken);
+    }
+
+    private async Task QueueMatchingNotificationsAsync(Guid requestId, CancellationToken cancellationToken)
+    {
+        if (background is null)
+        {
+            await NotifyMatchingProvidersByIdAsync(requestId, cancellationToken);
+            return;
+        }
+
+        background.Enqueue(async (sp, ct) =>
+        {
+            var again = sp.GetRequiredService<ServiceRequestAppService>();
+            await again.NotifyMatchingProvidersByIdAsync(requestId, ct);
+        });
     }
 
     /// <summary>Lists requests created by the current user.</summary>

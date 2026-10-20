@@ -44,11 +44,42 @@ public static class FieldRules
         }
     }
 
+    public static void RequireRequestText(string? title, string? description)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            throw new AppException("กรุณากรอกหัวข้องาน", 400);
+        }
+
+        if (title.Trim().Length > 100)
+        {
+            throw new AppException("หัวข้องานต้องไม่เกิน 100 ตัวอักษร", 400);
+        }
+
+        if (description is not null && description.Trim().Length > 1000)
+        {
+            throw new AppException("รายละเอียดต้องไม่เกิน 1000 ตัวอักษร", 400);
+        }
+    }
+
+    public static void RequireServiceTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            throw new AppException("กรุณากรอกชื่อบริการ", 400);
+        }
+
+        if (title.Trim().Length > 80)
+        {
+            throw new AppException("ชื่อบริการต้องไม่เกิน 80 ตัวอักษร", 400);
+        }
+    }
+
     public static void RequirePrice(string? price)
     {
         if (string.IsNullOrWhiteSpace(price) || !IsPriceText(price))
         {
-            throw new AppException("ราคาต้องเป็นตัวเลขหรือช่วงราคา เช่น 40 หรือ 40-80", 400);
+            throw new AppException("ราคาต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 1000000 หรือช่วงราคาที่ต่ำไม่เกินสูง เช่น 40 หรือ 40-80", 400);
         }
     }
 
@@ -92,13 +123,13 @@ public static class FieldRules
             return false;
         }
 
-        if (!decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out amount))
+        if (!decimal.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out amount))
         {
             return false;
         }
 
-        return amount > 0 && amount <= BudgetMax;
+        return amount > 0 && amount <= BudgetMax && amount == decimal.Truncate(amount);
     }
 
-    private static readonly Regex PositiveAmountPattern = new(@"^\d+(?:\.\d+)?$", RegexOptions.CultureInvariant);
+    private static readonly Regex PositiveAmountPattern = new(@"^\d+$", RegexOptions.CultureInvariant);
 }

@@ -1,5 +1,6 @@
 using System.Text;
 using LocalGo.Application.Abstractions.Auth;
+using LocalGo.Application.Common;
 using LocalGo.Application.Abstractions.Line;
 using LocalGo.Application.Abstractions.Notifications;
 using LocalGo.Application.Abstractions.Persistence;
@@ -40,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<INotificationPublisher, NotificationPublisher>();
         services.AddHttpClient("line");
 
+        services.AddSingleton<IBackgroundWork, BackgroundWork>();
         services.AddHostedService<RequestExpirationHostedService>();
         services.AddHostedService<NotificationRetryHostedService>();
 

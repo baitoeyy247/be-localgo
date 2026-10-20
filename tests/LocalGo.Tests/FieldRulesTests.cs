@@ -67,6 +67,8 @@ public sealed class FieldRulesTests
     [InlineData("0")]
     [InlineData("-1")]
     [InlineData("")]
+    [InlineData("1.5")]
+    [InlineData("80-40")]
     public void Price_rejects_invalid_values(string price)
     {
         var ex = Assert.Throws<AppException>(() => FieldRules.RequirePrice(price));

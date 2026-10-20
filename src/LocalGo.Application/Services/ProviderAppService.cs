@@ -134,11 +134,7 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
         Guid userId, Guid providerId, CreateServiceRequest request, CancellationToken cancellationToken)
     {
         var provider = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
-        if (string.IsNullOrWhiteSpace(request.Title))
-        {
-            throw new AppException("กรุณากรอกชื่อบริการ", 400);
-        }
-
+        FieldRules.RequireServiceTitle(request.Title);
         FieldRules.RequirePrice(request.BasePriceText);
         var now = DateTime.UtcNow;
         var service = new ProviderService
@@ -212,6 +208,7 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
 
         if (request.Title is not null)
         {
+            FieldRules.RequireServiceTitle(request.Title);
             service.Title = request.Title.Trim();
         }
 
@@ -244,6 +241,20 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
             ?? throw new AppException("Service not found.", 404);
         service.IsActive = active;
         service.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteServiceAsync(Guid userId, Guid providerId, Guid serviceId, CancellationToken cancellationToken)
+    {
+        _ = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
+        var service = await db.ProviderServices.FirstOrDefaultAsync(
+            s => s.Id == serviceId && s.ProviderId == providerId, cancellationToken)
+            ?? throw new AppException("Service not found.", 404);
+        var links = await db.ProviderServiceBranches
+            .Where(x => x.ProviderServiceId == serviceId)
+            .ToListAsync(cancellationToken);
+        db.ProviderServiceBranches.RemoveRange(links);
+        db.ProviderServices.Remove(service);
         await db.SaveChangesAsync(cancellationToken);
     }
 

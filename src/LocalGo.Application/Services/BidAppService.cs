@@ -110,6 +110,10 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
     public async Task SelectAsync(Guid userId, Guid requestId, SelectBidRequest request, CancellationToken cancellationToken)
     {
         var serviceRequest = await MarketplaceAccess.RequireOwnedRequestWithBidsAsync(db, userId, requestId, cancellationToken);
+        if (serviceRequest.Status is not (ServiceRequestStatus.Open or ServiceRequestStatus.HasOffers))
+        {
+            throw new AppException("งานนี้เลือกผู้ให้บริการแล้ว จึงเลือกข้อเสนอใหม่ไม่ได้", 409);
+        }
 
         var selected = serviceRequest.Bids.FirstOrDefault(b => b.Id == request.BidId)
             ?? throw new AppException("Bid not found.", 404);

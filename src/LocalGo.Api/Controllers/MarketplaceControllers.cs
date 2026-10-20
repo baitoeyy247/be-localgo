@@ -139,6 +139,14 @@ public sealed class ProvidersController(ICurrentUserService currentUser, Provide
         return NoContent();
     }
 
+    [HttpDelete("{providerId:guid}/services/{serviceId:guid}")]
+    public async Task<IActionResult> DeleteService(Guid providerId, Guid serviceId, CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        await providers.DeleteServiceAsync(userId, providerId, serviceId, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("{providerId:guid}/services/{serviceId:guid}/pause")]
     public async Task<IActionResult> PauseService(Guid providerId, Guid serviceId, CancellationToken cancellationToken)
     {
