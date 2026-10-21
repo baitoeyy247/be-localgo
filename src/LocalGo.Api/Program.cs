@@ -122,7 +122,6 @@ if (isDevOrSit)
 
     var migrateLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitMigrate");
     await AppointmentSchemaBootstrap.EnsureDeclineReasonColumnAsync(db, migrateLogger);
-    await AppointmentSchemaBootstrap.EnsureSitListIndexesAsync(db);
 
     await DataSeeder.SeedAsync(db);
 

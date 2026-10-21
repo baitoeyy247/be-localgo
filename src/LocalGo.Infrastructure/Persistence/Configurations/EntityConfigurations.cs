@@ -138,8 +138,6 @@ internal sealed class AppointmentConfiguration : IEntityTypeConfiguration<Appoin
         builder.Property(x => x.Note).HasMaxLength(2000);
         builder.Property(x => x.DeclineReason).HasMaxLength(2000);
         builder.Property(x => x.Location).HasColumnType("geography (Point,4326)");
-        builder.HasIndex(x => x.CreatedAt);
-        builder.HasIndex(x => new { x.Status, x.CreatedAt });
     }
 }
 
