@@ -177,6 +177,7 @@ public sealed class ServiceRequestAppService(
         Guid viewerUserId, Guid requestId, bool isAdmin, CancellationToken cancellationToken)
     {
         var request = await db.ServiceRequests
+            .AsNoTracking()
             .Include(r => r.Bids).ThenInclude(b => b.Provider)
             .Include(r => r.Category)
             .FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken);

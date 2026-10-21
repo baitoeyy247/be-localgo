@@ -48,6 +48,8 @@ public static class AppointmentSchemaBootstrap
                 ON service_requests ("CreatedAt" DESC);
             CREATE INDEX IF NOT EXISTS "IX_service_requests_Status_CreatedAt"
                 ON service_requests ("Status", "CreatedAt" DESC);
+            CREATE INDEX IF NOT EXISTS "IX_service_requests_RequesterUserId_CreatedAt"
+                ON service_requests ("RequesterUserId", "CreatedAt" DESC);
             """,
             cancellationToken);
     }

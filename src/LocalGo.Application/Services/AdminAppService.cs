@@ -149,6 +149,8 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await db.SaveChangesAsync(cancellationToken);
         }
 
+        var deletedAutomatedUsers = await PurgeAutomatedTestUsersAsync(cancellationToken);
+
         var sampleReviewsSeeded = seedSampleReviews
             ? await reviews.SeedQaProvider01SampleReviewsAsync(cancellationToken)
             : 0;
@@ -159,6 +161,7 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             reviewReassigned = reassigned,
             targetProviderId = qaProviderId,
             staleRequestsRemoved = staleIds.Count,
+            deletedAutomatedUsers,
             sampleReviewsSeeded,
             providersRecalculated = providersTouched,
         };
@@ -230,15 +233,21 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await DeletePlaytestMarketplaceRowsAsync(userIds, providerIds, requestIds, cancellationToken);
         }
 
+        var deletedAutomatedUsers = await PurgeAutomatedTestUsersAsync(cancellationToken);
+
         await SyncPlaytestPersonaLabelsAsync(cancellationToken);
 
         var sampleReviewsSeeded = await reviews.SeedQaProvider01SampleReviewsAsync(cancellationToken);
         var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
 
+        var keptUsers = await db.Users.AsNoTracking()
+            .CountAsync(u => u.LineUserId.StartsWith(TestUserLinePrefix), cancellationToken);
+
         return new
         {
-            deletedUsers = 0,
-            keptUsers = testUsers.Count,
+            deletedUsers = deletedAutomatedUsers,
+            deletedAutomatedUsers,
+            keptUsers,
             deletedRequests = requestIds.Count,
             deletedAutomatedRequests = automatedRequestIds.Count,
             sampleReviewsSeeded,
@@ -305,6 +314,53 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
         }
 
         return touched;
+    }
+
+    /// <summary>Removes leftover automated-test users (e.g. Appt Flow) while keeping dev-persona accounts.</summary>
+    public async Task<int> PurgeAutomatedTestUsersAsync(CancellationToken cancellationToken)
+    {
+        var junkUsers = await db.Users
+            .Where(u => !u.LineUserId.StartsWith(TestUserLinePrefix)
+                || (u.DisplayName != null
+                    && (u.DisplayName.Contains("Appt Flow") || u.DisplayName.Contains("Appt flow"))))
+            .ToListAsync(cancellationToken);
+        if (junkUsers.Count == 0)
+        {
+            return 0;
+        }
+
+        var junkIds = junkUsers.Select(u => u.Id).ToHashSet();
+        var junkProviderIds = await db.Providers
+            .Where(p => junkIds.Contains(p.OwnerUserId))
+            .Select(p => p.Id)
+            .ToListAsync(cancellationToken);
+
+        var junkRequestIds = await db.ServiceRequests
+            .Where(r => junkIds.Contains(r.RequesterUserId)
+                || (r.SelectedProviderId != null && junkProviderIds.Contains(r.SelectedProviderId.Value)))
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        if (junkRequestIds.Count > 0)
+        {
+            await DeletePlaytestMarketplaceRowsAsync(junkIds, junkProviderIds, junkRequestIds, cancellationToken);
+        }
+
+        db.Reviews.RemoveRange(
+            await db.Reviews.Where(r => junkIds.Contains(r.ReviewerUserId) || junkProviderIds.Contains(r.ProviderId))
+                .ToListAsync(cancellationToken));
+
+        db.Providers.RemoveRange(
+            await db.Providers.Where(p => junkIds.Contains(p.OwnerUserId)).ToListAsync(cancellationToken));
+
+        db.NotificationLogs.RemoveRange(
+            await db.NotificationLogs.Where(n => n.UserId != null && junkIds.Contains(n.UserId.Value))
+                .ToListAsync(cancellationToken));
+
+        db.Users.RemoveRange(junkUsers);
+        await db.SaveChangesAsync(cancellationToken);
+        db.ClearChangeTracker();
+        return junkUsers.Count;
     }
 
     private async Task DeletePlaytestMarketplaceRowsAsync(
