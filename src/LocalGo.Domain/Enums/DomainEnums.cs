@@ -71,6 +71,8 @@ public enum AppointmentStatus
     InProgress = 2,
     Completed = 3,
     Cancelled = 4,
+    /// <summary>Provider declined a pending appointment; requester may pick another offer or rebook.</summary>
+    Rejected = 5,
 }
 
 public enum ReviewType

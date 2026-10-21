@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using LocalGo.Application.Abstractions.Auth;
 using LocalGo.Application.Abstractions.Persistence;
+using LocalGo.Application.Common;
 using LocalGo.Domain.Entities;
 using LocalGo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -106,25 +107,89 @@ public sealed class DevAuthService(
 
     private async Task EnsureProviderProfileAsync(User user, CancellationToken cancellationToken)
     {
-        var exists = await db.Providers.AnyAsync(p => p.OwnerUserId == user.Id, cancellationToken);
-        if (exists)
+        var now = DateTime.UtcNow;
+        var provider = await db.Providers
+            .Include(p => p.Branches)
+            .Include(p => p.Services)
+            .FirstOrDefaultAsync(p => p.OwnerUserId == user.Id, cancellationToken);
+
+        if (provider is null)
         {
-            return;
+            provider = new Provider
+            {
+                Id = Guid.NewGuid(),
+                OwnerUserId = user.Id,
+                ProviderType = ProviderType.Individual,
+                Name = user.DisplayName,
+                Description = "โปรไฟล์ทดสอบ — มีบริการและจุดบริการพร้อมใช้",
+                Status = ProviderStatus.Active,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            db.Providers.Add(provider);
+            await db.SaveChangesAsync(cancellationToken);
         }
 
-        var now = DateTime.UtcNow;
-        db.Providers.Add(new Provider
+        // Ensure at least one branch (Mahasarakham — not Bangkok default).
+        if (!provider.Branches.Any(b => b.IsActive))
         {
-            Id = Guid.NewGuid(),
-            OwnerUserId = user.Id,
-            ProviderType = ProviderType.Individual,
-            Name = user.DisplayName,
-            Description = "โปรไฟล์ทดสอบ — สลับบทบาทได้โดยไม่ลบข้อมูลเดิม",
-            Status = ProviderStatus.Active,
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
-        await db.SaveChangesAsync(cancellationToken);
+            const double lat = 16.1850;
+            const double lng = 103.3020;
+            db.ProviderBranches.Add(new ProviderBranch
+            {
+                Id = Guid.NewGuid(),
+                ProviderId = provider.Id,
+                Name = "จุดบริการหลัก",
+                AddressText = "อำเภอเมืองมหาสารคาม จังหวัดมหาสารคาม",
+                Latitude = lat,
+                Longitude = lng,
+                Location = GeoHelper.CreatePoint(lat, lng),
+                ServiceRadiusMeters = 15_000,
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // Ensure at least one active catalog service linked to a category.
+        if (!provider.Services.Any(s => s.IsActive))
+        {
+            var categoryId = await db.ServiceCategories.AsNoTracking()
+                .OrderBy(c => c.Name)
+                .Select(c => (Guid?)c.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (categoryId is Guid catId)
+            {
+                var service = new ProviderService
+                {
+                    Id = Guid.NewGuid(),
+                    ProviderId = provider.Id,
+                    CategoryId = catId,
+                    Title = "บริการทดสอบ",
+                    Description = "บริการตัวอย่างสำหรับบัญชีทดสอบ",
+                    BasePriceText = "500",
+                    IsActive = true,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                };
+                db.ProviderServices.Add(service);
+
+                var branchId = await db.ProviderBranches.AsNoTracking()
+                    .Where(b => b.ProviderId == provider.Id && b.IsActive)
+                    .Select(b => b.Id)
+                    .FirstAsync(cancellationToken);
+                db.ProviderServiceBranches.Add(new ProviderServiceBranch
+                {
+                    Id = Guid.NewGuid(),
+                    ProviderServiceId = service.Id,
+                    ProviderBranchId = branchId,
+                    IsActive = true,
+                    CreatedAt = now,
+                });
+                await db.SaveChangesAsync(cancellationToken);
+            }
+        }
     }
 
     private static string? NormalizePersonaKey(string? raw)

@@ -215,6 +215,7 @@ public static class NotificationMessageBuilder
         "InProgress" => "กำลังดำเนินงาน",
         "Completed" => "เสร็จสิ้น",
         "Cancelled" => "ยกเลิกแล้ว",
+        "Rejected" => "ผู้ให้บริการปฏิเสธ",
         _ => status,
     };
 

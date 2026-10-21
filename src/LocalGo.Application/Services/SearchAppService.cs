@@ -100,7 +100,10 @@ public sealed class SearchAppService(ILocalGoDbContext db)
                     serviceId = s.ServiceId,
                     branch,
                     category = s.Category,
-                    Distance = GeoHelper.DistanceMeters(branch.Location, point),
+                    // Prefer lat/lng columns so distance never collapses to 0 from a stale Point.
+                    Distance = GeoHelper.DistanceMeters(
+                        GeoHelper.CreatePoint(branch.Latitude, branch.Longitude),
+                        point),
                 });
             });
 

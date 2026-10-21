@@ -158,6 +158,7 @@ public sealed class MarketplaceFlowTests
             seed.ProviderUser.Id,
             seed.Appointment!.Id,
             AppointmentStatus.Confirmed,
+            null,
             CancellationToken.None);
         Assert.Equal(AppointmentStatus.Confirmed, confirmed.Status);
         Assert.Equal(ServiceRequestStatus.Scheduled, seed.Request.Status);
@@ -166,6 +167,7 @@ public sealed class MarketplaceFlowTests
             seed.ProviderUser.Id,
             seed.Appointment.Id,
             AppointmentStatus.Completed,
+            null,
             CancellationToken.None));
         Assert.Equal(409, skipped.StatusCode);
 
@@ -173,6 +175,7 @@ public sealed class MarketplaceFlowTests
             seed.Requester.Id,
             seed.Appointment.Id,
             AppointmentStatus.InProgress,
+            null,
             CancellationToken.None));
         Assert.Equal(403, requesterStart.StatusCode);
 
@@ -183,6 +186,7 @@ public sealed class MarketplaceFlowTests
             seed.ProviderUser.Id,
             seed.Appointment.Id,
             AppointmentStatus.InProgress,
+            null,
             CancellationToken.None);
         Assert.Equal(AppointmentStatus.InProgress, started.Status);
         Assert.Equal(ServiceRequestStatus.InProgress, seed.Request.Status);
@@ -191,6 +195,7 @@ public sealed class MarketplaceFlowTests
             seed.Requester.Id,
             seed.Appointment.Id,
             AppointmentStatus.Completed,
+            null,
             CancellationToken.None));
         Assert.Equal(403, requesterComplete.StatusCode);
 
@@ -198,6 +203,7 @@ public sealed class MarketplaceFlowTests
             seed.ProviderUser.Id,
             seed.Appointment.Id,
             AppointmentStatus.Completed,
+            null,
             CancellationToken.None);
         Assert.Equal(AppointmentStatus.Completed, completed.Status);
         Assert.Equal(ServiceRequestStatus.Completed, seed.Request.Status);
@@ -244,6 +250,7 @@ public sealed class MarketplaceFlowTests
             seed.ProviderUser.Id,
             seed.Appointment!.Id,
             AppointmentStatus.Confirmed,
+            null,
             CancellationToken.None);
         seed.Appointment.ScheduledAt = DateTime.UtcNow;
         await db.SaveChangesAsync();

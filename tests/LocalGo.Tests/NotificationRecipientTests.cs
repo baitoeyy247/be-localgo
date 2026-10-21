@@ -198,6 +198,7 @@ public sealed class NotificationRecipientTests
             seed.ProviderUser.Id,
             seed.Appointment!.Id,
             AppointmentStatus.Confirmed,
+            null,
             CancellationToken.None);
 
         await notifications.Received(1).EnqueueAsync(
@@ -235,6 +236,7 @@ public sealed class NotificationRecipientTests
             seed.Requester.Id,
             seed.Appointment!.Id,
             AppointmentStatus.Cancelled,
+            null,
             CancellationToken.None);
 
         await notifications.Received(1).EnqueueAsync(

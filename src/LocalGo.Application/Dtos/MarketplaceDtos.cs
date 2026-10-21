@@ -59,6 +59,7 @@ public sealed record SelectBidRequest(Guid BidId);
 public sealed record SelectProviderRequest(Guid ProviderId);
 public sealed record SubmitBidRequest(string PriceText, decimal? Amount, string? Currency, string? Description, DateTime? AvailableAt);
 public sealed record CreateAppointmentRequest(DateTime? ScheduledAt, string? AddressText, double? Latitude, double? Longitude, string? Note);
+public sealed record UpdateAppointmentStatusRequest(string? Reason);
 public sealed record CreateReviewRequest(Guid? ServiceRequestId, string ReviewType, int Rating, string? Comment);
 public sealed record CreateReportRequest(string TargetType, Guid TargetId, string Reason, string? Description);
 

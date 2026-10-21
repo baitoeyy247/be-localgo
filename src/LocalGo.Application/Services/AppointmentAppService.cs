@@ -34,12 +34,15 @@ public sealed class AppointmentAppService(
         }
 
         var now = DateTime.UtcNow;
+        var whenLabel = request.ScheduledAt is DateTime at
+            ? FormatThaiDateTime(at)
+            : "รอยืนยันเวลา";
         var serviceRequest = new ServiceRequest
         {
             Id = Guid.NewGuid(),
             RequesterUserId = userId,
             CategoryId = service.CategoryId,
-            Title = service.Title,
+            Title = $"{service.Title} · {whenLabel}",
             Description = request.Note ?? service.Description,
             AddressText = request.AddressText,
             Latitude = lat,
@@ -132,10 +135,9 @@ public sealed class AppointmentAppService(
 
         await MarketplaceAccess.EnsureServiceRequestViewerAsync(db, userId, serviceRequest, cancellationToken);
 
+        // Include Cancelled/Rejected so both parties see the terminal status after refresh.
         return await db.Appointments.AsNoTracking()
-            .FirstOrDefaultAsync(
-                a => a.ServiceRequestId == requestId && a.Status != AppointmentStatus.Cancelled,
-                cancellationToken);
+            .FirstOrDefaultAsync(a => a.ServiceRequestId == requestId, cancellationToken);
     }
 
     /// <summary>Loads an appointment by id for a participant (requester or provider owner).</summary>
@@ -157,11 +159,16 @@ public sealed class AppointmentAppService(
         return appointment;
     }
 
-    /// <summary>Updates appointment status; request status follows appointment lifecycle.</summary>
+    /// <summary>Updates appointment status; request status follows appointment lifecycle in the same SaveChanges.</summary>
     public async Task<Appointment> UpdateStatusAsync(
-        Guid userId, Guid appointmentId, AppointmentStatus status, CancellationToken cancellationToken)
+        Guid userId,
+        Guid appointmentId,
+        AppointmentStatus status,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
     {
         var appointment = await db.Appointments.Include(a => a.ServiceRequest)
+            .ThenInclude(r => r.Bids)
             .FirstOrDefaultAsync(a => a.Id == appointmentId, cancellationToken)
             ?? throw new AppException("Appointment not found.", 404);
 
@@ -178,12 +185,24 @@ public sealed class AppointmentAppService(
         EnsureTransition(appointment.Status, status, isProvider);
         if (status is AppointmentStatus.InProgress or AppointmentStatus.Completed)
         {
-            EnsureAppointmentWindow(appointment.ScheduledAt);
+            var skipWindow = await IsTestPersonaUserAsync(userId, cancellationToken);
+            if (!skipWindow)
+            {
+                EnsureAppointmentWindow(appointment.ScheduledAt);
+            }
+        }
+
+        if (status == AppointmentStatus.Rejected && !string.IsNullOrWhiteSpace(reason))
+        {
+            var trimmed = reason.Trim();
+            appointment.Note = string.IsNullOrWhiteSpace(appointment.Note)
+                ? $"เหตุผลที่ปฏิเสธ: {trimmed}"
+                : $"{appointment.Note}\nเหตุผลที่ปฏิเสธ: {trimmed}";
         }
 
         appointment.Status = status;
         appointment.UpdatedAt = DateTime.UtcNow;
-        ApplyRequestStatusForAppointment(appointment, status);
+        await ApplyRequestStatusForAppointmentAsync(appointment, status, cancellationToken);
         ProgressHelper.Touch(appointment.ServiceRequest);
         await db.SaveChangesAsync(cancellationToken);
         await NotifyOtherPartyAsync(
@@ -195,6 +214,16 @@ public sealed class AppointmentAppService(
         return appointment;
     }
 
+    private async Task<bool> IsTestPersonaUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var lineUserId = await db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => u.LineUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+        return lineUserId is not null
+            && lineUserId.StartsWith(AdminAppService.TestUserLinePrefix, StringComparison.Ordinal);
+    }
+
     private async Task<Appointment> UpsertExistingAppointmentAsync(
         Guid actorUserId,
         ServiceRequest serviceRequest,
@@ -203,7 +232,7 @@ public sealed class AppointmentAppService(
         DateTime now,
         CancellationToken cancellationToken)
     {
-        if (existing.Status == AppointmentStatus.Cancelled)
+        if (existing.Status is AppointmentStatus.Cancelled or AppointmentStatus.Rejected)
         {
             ApplyAppointmentFields(existing, request, merge: false);
             existing.Status = AppointmentStatus.Pending;
@@ -263,6 +292,14 @@ public sealed class AppointmentAppService(
         }
     }
 
+    private static string FormatThaiDateTime(DateTime utcOrUnspecified)
+    {
+        var utc = utcOrUnspecified.Kind == DateTimeKind.Utc
+            ? utcOrUnspecified
+            : DateTime.SpecifyKind(utcOrUnspecified, DateTimeKind.Utc);
+        return utc.AddHours(7).ToString("d MMM yyyy HH:mm", new System.Globalization.CultureInfo("th-TH"));
+    }
+
     /// <summary>Work cannot start or finish earlier than one hour before the appointment.</summary>
     private static void EnsureAppointmentWindow(DateTime? scheduledAt)
     {
@@ -275,6 +312,7 @@ public sealed class AppointmentAppService(
     /// <summary>
     /// Confirmed → in progress → completed is provider-only.
     /// Either participant may cancel before the job starts.
+    /// Provider may reject while pending.
     /// </summary>
     private static void EnsureTransition(AppointmentStatus current, AppointmentStatus next, bool isProvider)
     {
@@ -289,6 +327,13 @@ public sealed class AppointmentAppService(
                 }
 
                 return;
+            case (AppointmentStatus.Pending, AppointmentStatus.Rejected):
+                if (!isProvider)
+                {
+                    throw new AppException("เฉพาะผู้ให้บริการที่ปฏิเสธนัดได้", 403);
+                }
+
+                return;
             case (AppointmentStatus.Pending, AppointmentStatus.Cancelled):
             case (AppointmentStatus.Confirmed, AppointmentStatus.Cancelled):
                 return;
@@ -299,20 +344,58 @@ public sealed class AppointmentAppService(
         }
     }
 
-    private static void ApplyRequestStatusForAppointment(Appointment appointment, AppointmentStatus status)
+    private async Task ApplyRequestStatusForAppointmentAsync(
+        Appointment appointment,
+        AppointmentStatus status,
+        CancellationToken cancellationToken)
     {
+        var request = appointment.ServiceRequest;
         if (status == AppointmentStatus.InProgress)
         {
-            appointment.ServiceRequest.Status = ServiceRequestStatus.InProgress;
+            request.Status = ServiceRequestStatus.InProgress;
+            return;
         }
-        else if (status == AppointmentStatus.Completed)
+
+        if (status == AppointmentStatus.Completed)
         {
-            appointment.ServiceRequest.Status = ServiceRequestStatus.Completed;
+            request.Status = ServiceRequestStatus.Completed;
+            return;
         }
-        else if (status == AppointmentStatus.Cancelled)
+
+        if (status == AppointmentStatus.Cancelled)
         {
-            appointment.ServiceRequest.Status = ServiceRequestStatus.ProviderSelected;
+            // Same transaction as appointment.Status = Cancelled (caller SaveChanges).
+            request.Status = ServiceRequestStatus.Cancelled;
+            return;
         }
+
+        if (status != AppointmentStatus.Rejected)
+        {
+            return;
+        }
+
+        // Provider declined — free the request so requester can pick another offer or rebook.
+        foreach (var bid in request.Bids.Where(b => b.Status == BidStatus.Selected))
+        {
+            bid.Status = BidStatus.Rejected;
+            bid.UpdatedAt = DateTime.UtcNow;
+        }
+
+        request.SelectedProviderId = null;
+        request.SelectedBidId = null;
+
+        if (request.Source == ServiceRequestSource.DirectBooking)
+        {
+            request.Status = ServiceRequestStatus.Cancelled;
+        }
+        else
+        {
+            var openBids = request.Bids.Count(b => b.Status is BidStatus.Submitted);
+            request.Status = openBids > 0 ? ServiceRequestStatus.HasOffers : ServiceRequestStatus.Open;
+        }
+
+        await Task.CompletedTask;
+        _ = cancellationToken;
     }
 
     private async Task NotifyOtherPartyAsync(

@@ -443,7 +443,11 @@ public sealed class AppointmentsController(ICurrentUserService currentUser, Appo
     }
 
     [HttpPatch("{appointmentId:guid}")]
-    public async Task<IActionResult> Update(Guid appointmentId, [FromQuery] string status, CancellationToken cancellationToken)
+    public async Task<IActionResult> Update(
+        Guid appointmentId,
+        [FromQuery] string status,
+        [FromBody] UpdateAppointmentStatusRequest? body,
+        CancellationToken cancellationToken)
     {
         var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
         if (!Enum.TryParse<AppointmentStatus>(status, true, out var parsed))
@@ -451,7 +455,8 @@ public sealed class AppointmentsController(ICurrentUserService currentUser, Appo
             return BadRequest();
         }
 
-        var appointment = await appointments.UpdateStatusAsync(userId, appointmentId, parsed, cancellationToken);
+        var appointment = await appointments.UpdateStatusAsync(
+            userId, appointmentId, parsed, body?.Reason, cancellationToken);
         return Ok(mapper.Map<AppointmentResponseDto>(appointment));
     }
 }

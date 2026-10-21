@@ -146,7 +146,7 @@ public sealed class ServiceRequestAppService(
         var appointments = ids.Length == 0
             ? []
             : await db.Appointments.AsNoTracking()
-                .Where(a => ids.Contains(a.ServiceRequestId) && a.Status != AppointmentStatus.Cancelled)
+                .Where(a => ids.Contains(a.ServiceRequestId))
                 .Select(a => new { a.ServiceRequestId, a.Status })
                 .ToListAsync(cancellationToken);
         var reviewByRequest = reviews
@@ -773,7 +773,9 @@ public sealed class ServiceRequestAppService(
             .Select(c => new
             {
                 c.Branch,
-                Distance = GeoHelper.DistanceMeters(c.Branch.Location, request.Location),
+                Distance = GeoHelper.DistanceMeters(
+                    GeoHelper.CreatePoint(c.Branch.Latitude, c.Branch.Longitude),
+                    GeoHelper.CreatePoint(request.Latitude, request.Longitude)),
             })
             .Where(x => x.Distance <= request.SearchRadiusMeters && x.Distance <= x.Branch.ServiceRadiusMeters)
             .OrderBy(x => x.Distance)
