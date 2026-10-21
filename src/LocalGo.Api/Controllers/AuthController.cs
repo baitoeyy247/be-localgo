@@ -29,7 +29,8 @@ public sealed class AuthController(
             return NotFound();
         }
 
-        if (request.AsAdmin && !environment.IsDevelopment())
+        // Temporary SIT test mode: allow admin persona while Staging is used for QA playtests.
+        if (request.AsAdmin && !(environment.IsDevelopment() || environment.IsStaging()))
         {
             return StatusCode(StatusCodes.Status403Forbidden);
         }
