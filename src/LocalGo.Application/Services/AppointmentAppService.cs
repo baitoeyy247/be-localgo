@@ -192,12 +192,9 @@ public sealed class AppointmentAppService(
             }
         }
 
-        if (status == AppointmentStatus.Rejected && !string.IsNullOrWhiteSpace(reason))
+        if (status == AppointmentStatus.Rejected)
         {
-            var trimmed = reason.Trim();
-            appointment.Note = string.IsNullOrWhiteSpace(appointment.Note)
-                ? $"เหตุผลที่ปฏิเสธ: {trimmed}"
-                : $"{appointment.Note}\nเหตุผลที่ปฏิเสธ: {trimmed}";
+            appointment.DeclineReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
         }
 
         appointment.Status = status;

@@ -136,6 +136,7 @@ internal sealed class AppointmentConfiguration : IEntityTypeConfiguration<Appoin
         builder.HasIndex(x => x.ServiceRequestId).IsUnique();
         builder.Property(x => x.AddressText).HasMaxLength(500);
         builder.Property(x => x.Note).HasMaxLength(2000);
+        builder.Property(x => x.DeclineReason).HasMaxLength(2000);
         builder.Property(x => x.Location).HasColumnType("geography (Point,4326)");
     }
 }

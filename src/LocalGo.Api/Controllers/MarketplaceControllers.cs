@@ -543,10 +543,14 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
     }
 
     [HttpPost("test-data/reset")]
-    public async Task<IActionResult> ResetTestData(CancellationToken cancellationToken)
+    public async Task<IActionResult> ResetTestData(CancellationToken cancellationToken) =>
+        Ok(await admin.ResetTestDataAsync(cancellationToken));
+
+    [HttpPost("ratings/recalculate")]
+    public async Task<IActionResult> RecalculateRatings(CancellationToken cancellationToken)
     {
-        var deleted = await admin.ResetTestDataAsync(cancellationToken);
-        return Ok(new { deletedUsers = deleted });
+        var repair = await admin.RepairSitPlaytestDataAsync(cancellationToken);
+        return Ok(repair);
     }
 
     [HttpPost("test-data/repair")]
@@ -578,6 +582,7 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
                 a.AddressText,
                 a.Status,
                 a.Note,
+                a.DeclineReason,
                 a.CreatedAt,
                 a.UpdatedAt,
             })
@@ -593,6 +598,7 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
             a.AddressText,
             Status = a.Status.ToString(),
             a.Note,
+            a.DeclineReason,
             a.CreatedAt,
             a.UpdatedAt,
         }));

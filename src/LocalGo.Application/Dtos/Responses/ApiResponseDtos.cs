@@ -119,6 +119,7 @@ public sealed class AppointmentResponseDto
     public double? Longitude { get; init; }
     public required string Status { get; init; }
     public string? Note { get; init; }
+    public string? DeclineReason { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
 }

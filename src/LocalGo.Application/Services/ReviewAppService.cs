@@ -193,6 +193,19 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>Recompute Average*/ReviewCount for every provider from the reviews table (idempotent).</summary>
+    public async Task<int> RecalculateAllProviderRatingsAsync(CancellationToken cancellationToken)
+    {
+        var providers = await db.Providers.ToListAsync(cancellationToken);
+        foreach (var provider in providers)
+        {
+            await RecalculateProviderRatingsAsync(provider, cancellationToken);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return providers.Count;
+    }
+
     private async Task<Guid?> ResolveJobProviderIdAsync(
         Guid serviceRequestId,
         Guid? selectedProviderId,

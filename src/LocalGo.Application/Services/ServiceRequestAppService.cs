@@ -28,6 +28,8 @@ public sealed class ServiceRequestAppService(
         ServiceRequestStatus.ProviderSelected,
         ServiceRequestStatus.Scheduled,
         ServiceRequestStatus.InProgress,
+        ServiceRequestStatus.Completed,
+        ServiceRequestStatus.Cancelled,
     ];
 
     /// <summary>Creates a draft or published marketplace service request.</summary>
@@ -736,15 +738,19 @@ public sealed class ServiceRequestAppService(
 
         var activeEngagements = await activeQuery.ToListAsync(cancellationToken);
         var activeIds = activeEngagements.Select(r => r.Id).ToList();
-        var pendingConfirmRequestIds = activeIds.Count == 0
-            ? new HashSet<Guid>()
+        var appointments = activeIds.Count == 0
+            ? []
             : await db.Appointments.AsNoTracking()
-                .Where(a =>
-                    activeIds.Contains(a.ServiceRequestId)
-                    && a.ProviderId == provider.Id
-                    && a.Status == AppointmentStatus.Pending)
-                .Select(a => a.ServiceRequestId)
-                .ToHashSetAsync(cancellationToken);
+                .Where(a => activeIds.Contains(a.ServiceRequestId) && a.ProviderId == provider.Id)
+                .Select(a => new { a.ServiceRequestId, a.Status })
+                .ToListAsync(cancellationToken);
+        var appointmentByRequest = appointments
+            .GroupBy(a => a.ServiceRequestId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.Status).First().Status);
+        var pendingConfirmRequestIds = appointmentByRequest
+            .Where(kv => kv.Value == AppointmentStatus.Pending)
+            .Select(kv => kv.Key)
+            .ToHashSet();
 
         foreach (var request in activeEngagements)
         {
@@ -757,12 +763,90 @@ public sealed class ServiceRequestAppService(
                 ? null
                 : NearestCoverageDistance(coverageLinks, request);
 
+            var apptStatusStr = appointmentByRequest.TryGetValue(request.Id, out var apptStatus)
+                ? apptStatus.ToString()
+                : null;
             results.Add(ToSummary(
                 request,
                 provider.Id,
                 userId,
                 distance,
-                pendingConfirmRequestIds.Contains(request.Id)));
+                pendingConfirmRequestIds.Contains(request.Id),
+                apptStatusStr));
+        }
+
+        // Rejected appointments clear SelectedProviderId — still show them under "ปฏิเสธ".
+        await AppendProviderTerminalAppointmentsAsync(
+            provider, userId, coverageLinks, excludeSmokeTestData, includeOwnRequests, results, seenIds, cancellationToken);
+    }
+
+    private async Task AppendProviderTerminalAppointmentsAsync(
+        Provider provider,
+        Guid userId,
+        IReadOnlyList<CoverageLink> coverageLinks,
+        bool excludeSmokeTestData,
+        bool includeOwnRequests,
+        List<ServiceRequestSummaryDto> results,
+        HashSet<Guid> seenIds,
+        CancellationToken cancellationToken)
+    {
+        var terminalStatuses = new[]
+        {
+            AppointmentStatus.Rejected,
+            AppointmentStatus.Cancelled,
+            AppointmentStatus.Completed,
+        };
+
+        var terminalAppts = await db.Appointments.AsNoTracking()
+            .Where(a => a.ProviderId == provider.Id && terminalStatuses.Contains(a.Status))
+            .OrderByDescending(a => a.UpdatedAt)
+            .Take(80)
+            .Select(a => new { a.ServiceRequestId, a.Status })
+            .ToListAsync(cancellationToken);
+
+        var missingIds = terminalAppts
+            .Select(a => a.ServiceRequestId)
+            .Where(id => !seenIds.Contains(id))
+            .Distinct()
+            .ToList();
+        if (missingIds.Count == 0)
+        {
+            return;
+        }
+
+        var statusByRequest = terminalAppts
+            .GroupBy(a => a.ServiceRequestId)
+            .ToDictionary(g => g.Key, g => g.First().Status.ToString());
+
+        var query = db.ServiceRequests.AsNoTracking()
+            .Include(r => r.Category)
+            .Include(r => r.Bids)
+            .Where(r => missingIds.Contains(r.Id)
+                && (includeOwnRequests || r.RequesterUserId != userId));
+        if (excludeSmokeTestData)
+        {
+            query = query.Where(r => r.Title != SmokeTestRequestTitle);
+        }
+
+        var requests = await query.ToListAsync(cancellationToken);
+        foreach (var request in requests)
+        {
+            if (!seenIds.Add(request.Id))
+            {
+                continue;
+            }
+
+            double? distance = coverageLinks.Count == 0
+                ? null
+                : NearestCoverageDistance(coverageLinks, request);
+            statusByRequest.TryGetValue(request.Id, out var apptStatus);
+            results.Add(ToSummary(
+                request,
+                provider.Id,
+                userId,
+                distance,
+                needsAppointmentConfirm: false,
+                appointmentStatus: apptStatus));
         }
     }
 
@@ -789,7 +873,8 @@ public sealed class ServiceRequestAppService(
         Guid providerId,
         Guid viewerUserId,
         double? distanceMeters,
-        bool needsAppointmentConfirm = false)
+        bool needsAppointmentConfirm = false,
+        string? appointmentStatus = null)
     {
         var alreadyBid = request.Bids.Any(b =>
             b.ProviderId == providerId
@@ -806,7 +891,8 @@ public sealed class ServiceRequestAppService(
             distanceMeters,
             alreadyBid,
             needsAppointmentConfirm,
-            request.RequesterUserId == viewerUserId);
+            request.RequesterUserId == viewerUserId,
+            AppointmentStatus: appointmentStatus);
     }
 
     private static string DisplayStatus(

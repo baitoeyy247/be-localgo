@@ -127,20 +127,21 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        if (qaProviderId is Guid pid)
-        {
-            await reviews.RecalculateRatingsForProviderAsync(pid, cancellationToken);
-        }
+        var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
 
         return new
         {
             reviewReassigned = reassigned,
             targetProviderId = qaProviderId,
             staleRequestsRemoved = staleIds.Count,
+            providersRecalculated = providersTouched,
         };
     }
 
-    public async Task<int> ResetTestDataAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Clears marketplace playtest data for persona accounts but keeps all 10 test users (and their provider profiles).
+    /// </summary>
+    public async Task<object> ResetTestDataAsync(CancellationToken cancellationToken)
     {
         var testUsers = await db.Users
             .Where(u => u.LineUserId.StartsWith(TestUserLinePrefix))
@@ -148,7 +149,7 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
 
         if (testUsers.Count == 0)
         {
-            return 0;
+            return new { deletedUsers = 0, keptUsers = 0, deletedRequests = 0, providersRecalculated = 0 };
         }
 
         var userIds = testUsers.Select(u => u.Id).ToHashSet();
@@ -158,7 +159,8 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             .ToListAsync(cancellationToken);
 
         var requestIds = await db.ServiceRequests
-            .Where(r => userIds.Contains(r.RequesterUserId))
+            .Where(r => userIds.Contains(r.RequesterUserId)
+                || (r.SelectedProviderId != null && providerIds.Contains(r.SelectedProviderId.Value)))
             .Select(r => r.Id)
             .ToListAsync(cancellationToken);
 
@@ -185,18 +187,17 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
         db.ServiceRequests.RemoveRange(
             await db.ServiceRequests.Where(r => requestIds.Contains(r.Id)).ToListAsync(cancellationToken));
 
-        var services = await db.ProviderServices.Where(s => providerIds.Contains(s.ProviderId)).ToListAsync(cancellationToken);
-        var serviceIds = services.Select(s => s.Id).ToList();
-        db.ProviderServiceBranches.RemoveRange(
-            await db.ProviderServiceBranches.Where(l => serviceIds.Contains(l.ProviderServiceId)).ToListAsync(cancellationToken));
-        db.ProviderServices.RemoveRange(services);
-        db.ProviderBranches.RemoveRange(
-            await db.ProviderBranches.Where(b => providerIds.Contains(b.ProviderId)).ToListAsync(cancellationToken));
-        db.Providers.RemoveRange(
-            await db.Providers.Where(p => providerIds.Contains(p.Id)).ToListAsync(cancellationToken));
-        db.Users.RemoveRange(testUsers);
-
         await db.SaveChangesAsync(cancellationToken);
-        return testUsers.Count;
+
+        // Keep all persona users + provider profiles; only refresh aggregates from remaining reviews.
+        var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
+
+        return new
+        {
+            deletedUsers = 0,
+            keptUsers = testUsers.Count,
+            deletedRequests = requestIds.Count,
+            providersRecalculated = providersTouched,
+        };
     }
 }
