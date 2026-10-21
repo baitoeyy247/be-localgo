@@ -543,7 +543,11 @@ public sealed class ReportsController(ICurrentUserService currentUser, ReportApp
 [Route("api/admin")]
 [Authorize(Policy = "Admin")]
 [RequireAdmin]
-public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db, LocalGoDbContext efDb) : ControllerBase
+public sealed class AdminController(
+    AdminAppService admin,
+    ILocalGoDbContext db,
+    LocalGoDbContext efDb,
+    ICurrentUserService currentUser) : ControllerBase
 {
     [HttpGet("dashboard")]
     public async Task<IActionResult> Dashboard(CancellationToken cancellationToken) =>
@@ -562,7 +566,8 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db,
         [FromBody] SetUserStatusRequest request,
         CancellationToken cancellationToken)
     {
-        await admin.SetUserStatusAsync(userId, request.Status, cancellationToken);
+        var actorUserId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        await admin.SetUserStatusAsync(actorUserId, userId, request.Status, cancellationToken);
         return NoContent();
     }
 

@@ -63,8 +63,17 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
         return page.Items;
     }
 
-    public async Task SetUserStatusAsync(Guid userId, string status, CancellationToken cancellationToken)
+    public async Task SetUserStatusAsync(
+        Guid actorUserId,
+        Guid userId,
+        string status,
+        CancellationToken cancellationToken)
     {
+        if (actorUserId == userId)
+        {
+            throw new AppException("ไม่สามารถระงับหรือเปิดใช้งานบัญชีของตัวเอง", 400);
+        }
+
         if (!Enum.TryParse<UserStatus>(status, true, out var parsed))
         {
             throw new AppException("สถานะผู้ใช้ไม่ถูกต้อง", 400);

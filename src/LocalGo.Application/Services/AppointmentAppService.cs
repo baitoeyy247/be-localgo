@@ -249,12 +249,20 @@ public sealed class AppointmentAppService(
         await ApplyRequestStatusForAppointmentAsync(appointment, status, cancellationToken);
         ProgressHelper.Touch(appointment.ServiceRequest);
         await db.SaveChangesAsync(cancellationToken);
-        await NotifyOtherPartyAsync(
-            userId,
-            appointment.ServiceRequest,
-            appointment,
-            NotificationEvents.AppointmentUpdated,
-            cancellationToken);
+        try
+        {
+            await NotifyOtherPartyAsync(
+                userId,
+                appointment.ServiceRequest,
+                appointment,
+                NotificationEvents.AppointmentUpdated,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Appointment {AppointmentId} status saved as {Status} but notification failed", appointmentId, status);
+        }
+
         return appointment;
     }
 
