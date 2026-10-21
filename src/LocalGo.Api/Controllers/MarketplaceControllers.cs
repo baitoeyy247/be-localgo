@@ -6,6 +6,7 @@ using LocalGo.Application.Dtos;
 using LocalGo.Application.Dtos.Responses;
 using LocalGo.Application.Services;
 using LocalGo.Domain.Enums;
+using LocalGo.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -521,7 +522,7 @@ public sealed class ReportsController(ICurrentUserService currentUser, ReportApp
 [Route("api/admin")]
 [Authorize(Policy = "Admin")]
 [RequireAdmin]
-public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db) : ControllerBase
+public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db, LocalGoDbContext efDb) : ControllerBase
 {
     [HttpGet("dashboard")]
     public async Task<IActionResult> Dashboard(CancellationToken cancellationToken) =>
@@ -545,8 +546,11 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
     }
 
     [HttpPost("test-data/reset")]
-    public async Task<IActionResult> ResetTestData(CancellationToken cancellationToken) =>
-        Ok(await admin.ResetTestDataAsync(cancellationToken));
+    public async Task<IActionResult> ResetTestData(CancellationToken cancellationToken)
+    {
+        await AppointmentSchemaBootstrap.EnsureSitListIndexesAsync(efDb, cancellationToken);
+        return Ok(await admin.ResetTestDataAsync(cancellationToken));
+    }
 
     [HttpPost("ratings/recalculate")]
     public async Task<IActionResult> RecalculateRatings(CancellationToken cancellationToken)
@@ -556,8 +560,11 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
     }
 
     [HttpPost("test-data/repair")]
-    public async Task<IActionResult> RepairTestData(CancellationToken cancellationToken) =>
-        Ok(await admin.RepairSitPlaytestDataAsync(cancellationToken));
+    public async Task<IActionResult> RepairTestData(CancellationToken cancellationToken)
+    {
+        await AppointmentSchemaBootstrap.EnsureSitListIndexesAsync(efDb, cancellationToken);
+        return Ok(await admin.RepairSitPlaytestDataAsync(cancellationToken));
+    }
 
     [HttpGet("appointments")]
     public async Task<IActionResult> Appointments(
