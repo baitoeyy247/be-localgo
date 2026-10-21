@@ -215,11 +215,11 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
             await db.SaveChangesAsync(cancellationToken);
         }
 
+        var req01Line = $"{AdminAppService.TestUserLinePrefix}req-01";
+        var req02Line = $"{AdminAppService.TestUserLinePrefix}req-02";
         var reviewers = await db.Users.AsNoTracking()
-            .Where(u => u.LineUserId.StartsWith(AdminAppService.TestUserLinePrefix)
-                && u.LineUserId.Contains("req", StringComparison.Ordinal))
+            .Where(u => u.LineUserId == req01Line || u.LineUserId == req02Line)
             .OrderBy(u => u.LineUserId)
-            .Take(2)
             .ToListAsync(cancellationToken);
         if (reviewers.Count < 2)
         {

@@ -73,7 +73,9 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
     /// Repairs the known mis-assigned review onto QA ผู้ให้ 01 (or the job's appointment provider)
     /// and drops stale Bangkok-default / duplicate-title test marketplace rows.
     /// </summary>
-    public async Task<object> RepairSitPlaytestDataAsync(CancellationToken cancellationToken)
+    public async Task<object> RepairSitPlaytestDataAsync(
+        CancellationToken cancellationToken,
+        bool seedSampleReviews = true)
     {
         var qaProviderId = await (
             from p in db.Providers.AsNoTracking()
@@ -143,7 +145,9 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        var sampleReviewsSeeded = await reviews.SeedQaProvider01SampleReviewsAsync(cancellationToken);
+        var sampleReviewsSeeded = seedSampleReviews
+            ? await reviews.SeedQaProvider01SampleReviewsAsync(cancellationToken)
+            : 0;
         var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
 
         return new

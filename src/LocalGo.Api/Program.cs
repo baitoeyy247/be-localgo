@@ -122,6 +122,7 @@ if (isDevOrSit)
 
     var migrateLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitMigrate");
     await AppointmentSchemaBootstrap.EnsureDeclineReasonColumnAsync(db, migrateLogger);
+    await AppointmentSchemaBootstrap.EnsureSitListIndexesAsync(db);
 
     await DataSeeder.SeedAsync(db);
 
@@ -129,7 +130,7 @@ if (isDevOrSit)
     try
     {
         var admin = scope.ServiceProvider.GetRequiredService<LocalGo.Application.Services.AdminAppService>();
-        await admin.RepairSitPlaytestDataAsync(CancellationToken.None);
+        await admin.RepairSitPlaytestDataAsync(CancellationToken.None, seedSampleReviews: false);
     }
     catch (Exception ex)
     {

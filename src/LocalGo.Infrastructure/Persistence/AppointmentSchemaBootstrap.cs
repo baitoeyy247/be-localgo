@@ -32,4 +32,19 @@ public static class AppointmentSchemaBootstrap
                 ex);
         }
     }
+
+    /// <summary>Idempotent list indexes for admin appointment queries on SIT (avoids EF migration on cold start).</summary>
+    public static async Task EnsureSitListIndexesAsync(
+        LocalGoDbContext db,
+        CancellationToken cancellationToken = default)
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE INDEX IF NOT EXISTS "IX_appointments_CreatedAt"
+                ON appointments ("CreatedAt" DESC);
+            CREATE INDEX IF NOT EXISTS "IX_appointments_Status_CreatedAt"
+                ON appointments ("Status", "CreatedAt" DESC);
+            """,
+            cancellationToken);
+    }
 }
