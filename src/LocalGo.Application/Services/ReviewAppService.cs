@@ -193,6 +193,71 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Re-seeds two verified sample reviews (avg 4.5) for QA ผู้ให้ 01 after SIT playtest reset.
+    /// </summary>
+    public async Task<int> SeedQaProvider01SampleReviewsAsync(CancellationToken cancellationToken)
+    {
+        var provLine = $"{AdminAppService.TestUserLinePrefix}prov-01";
+        var provider = await db.Providers
+            .FirstOrDefaultAsync(
+                p => db.Users.Any(u => u.Id == p.OwnerUserId && u.LineUserId == provLine),
+                cancellationToken);
+        if (provider is null)
+        {
+            return 0;
+        }
+
+        var existing = await db.Reviews.Where(r => r.ProviderId == provider.Id).ToListAsync(cancellationToken);
+        if (existing.Count > 0)
+        {
+            db.Reviews.RemoveRange(existing);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var reviewers = await db.Users.AsNoTracking()
+            .Where(u => u.LineUserId.StartsWith(AdminAppService.TestUserLinePrefix)
+                && u.LineUserId.Contains("req", StringComparison.Ordinal))
+            .OrderBy(u => u.LineUserId)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+        if (reviewers.Count < 2)
+        {
+            return 0;
+        }
+
+        var now = DateTime.UtcNow;
+        db.Reviews.AddRange(
+            new Review
+            {
+                Id = Guid.NewGuid(),
+                ReviewerUserId = reviewers[0].Id,
+                ProviderId = provider.Id,
+                ReviewType = ReviewType.Verified,
+                Rating = 5,
+                Comment = "บริการดีมาก ตรงเวลา",
+                Status = ReviewStatus.Published,
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
+            new Review
+            {
+                Id = Guid.NewGuid(),
+                ReviewerUserId = reviewers[1].Id,
+                ProviderId = provider.Id,
+                ReviewType = ReviewType.Verified,
+                Rating = 4,
+                Comment = "พอใจมาก แนะนำ",
+                Status = ReviewStatus.Published,
+                CreatedAt = now.AddMinutes(-1),
+                UpdatedAt = now.AddMinutes(-1),
+            });
+
+        await RecalculateProviderRatingsAsync(provider, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return 2;
+    }
+
     /// <summary>Recompute Average*/ReviewCount for every provider from the reviews table (idempotent).</summary>
     public async Task<int> RecalculateAllProviderRatingsAsync(CancellationToken cancellationToken)
     {

@@ -143,6 +143,7 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await db.SaveChangesAsync(cancellationToken);
         }
 
+        var sampleReviewsSeeded = await reviews.SeedQaProvider01SampleReviewsAsync(cancellationToken);
         var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
 
         return new
@@ -150,6 +151,7 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             reviewReassigned = reassigned,
             targetProviderId = qaProviderId,
             staleRequestsRemoved = staleIds.Count,
+            sampleReviewsSeeded,
             providersRecalculated = providersTouched,
         };
     }
@@ -176,11 +178,30 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             .Select(p => p.Id)
             .ToListAsync(cancellationToken);
 
-        var requestIds = await db.ServiceRequests
+        var personaRequestIds = await db.ServiceRequests
             .Where(r => userIds.Contains(r.RequesterUserId)
                 || (r.SelectedProviderId != null && providerIds.Contains(r.SelectedProviderId.Value)))
             .Select(r => r.Id)
             .ToListAsync(cancellationToken);
+
+        var automatedProviderIds = await db.Providers.AsNoTracking()
+            .Where(p => p.Name.Contains("Appt Flow") || p.Name.Contains("Appt flow"))
+            .Select(p => p.Id)
+            .ToListAsync(cancellationToken);
+
+        var automatedRequestIds = await db.ServiceRequests.AsNoTracking()
+            .Where(r =>
+                r.Title.Contains("Appt flow") || r.Title.Contains("Appt Flow")
+                || (r.SelectedProviderId != null && automatedProviderIds.Contains(r.SelectedProviderId.Value))
+                || db.Appointments.Any(a =>
+                    a.ServiceRequestId == r.Id && automatedProviderIds.Contains(a.ProviderId)))
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        var requestIds = personaRequestIds
+            .Concat(automatedRequestIds)
+            .Distinct()
+            .ToList();
 
         if (db is not DbContext efContext)
         {
@@ -201,7 +222,7 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await DeletePlaytestMarketplaceRowsAsync(userIds, providerIds, requestIds, cancellationToken);
         }
 
-        // Keep all persona users + provider profiles; only refresh aggregates from remaining reviews.
+        var sampleReviewsSeeded = await reviews.SeedQaProvider01SampleReviewsAsync(cancellationToken);
         var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
 
         return new
@@ -209,6 +230,8 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             deletedUsers = 0,
             keptUsers = testUsers.Count,
             deletedRequests = requestIds.Count,
+            deletedAutomatedRequests = automatedRequestIds.Count,
+            sampleReviewsSeeded,
             providersRecalculated = providersTouched,
         };
     }

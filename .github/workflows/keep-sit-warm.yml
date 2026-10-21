@@ -9,5 +9,13 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping SIT health
-        run: curl -fsS --retry 2 --max-time 60 https://be-localgo-ul36.onrender.com/api/health
+      - name: Ping SIT health and core APIs
+        run: |
+          set -euo pipefail
+          BASE="https://be-localgo-ul36.onrender.com/api"
+          echo "==> health"
+          curl -fsS --retry 2 --max-time 60 "$BASE/health"
+          echo
+          echo "==> GET categories (public)"
+          curl -fsS --retry 1 --max-time 90 -o /dev/null -w "time_total=%{time_total}s http=%{http_code}\n" \
+            "$BASE/categories"
