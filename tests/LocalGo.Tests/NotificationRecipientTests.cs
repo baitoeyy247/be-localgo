@@ -2,6 +2,7 @@ using LocalGo.Application.Abstractions.Notifications;
 using LocalGo.Application.Common;
 using LocalGo.Application.Dtos;
 using LocalGo.Application.Services;
+using LocalGo.Domain.Entities;
 using LocalGo.Domain.Enums;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -10,6 +11,37 @@ namespace LocalGo.Tests;
 
 public sealed class NotificationRecipientTests
 {
+    [Fact]
+    public async Task SubmitAsync_rejects_bid_when_category_does_not_match_provider_service()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedOpenBidRequestAsync(db);
+        var otherCategory = new ServiceCategory
+        {
+            Id = Guid.NewGuid(),
+            Name = "Food",
+            Slug = $"food-{Guid.NewGuid():N}",
+            SortOrder = 2,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        seed.Request.CategoryId = otherCategory.Id;
+        db.ServiceCategories.Add(otherCategory);
+        await db.SaveChangesAsync();
+
+        var sut = new BidAppService(db, TestDbFactory.NoopNotifications(), NullLogger<BidAppService>.Instance);
+        var ex = await Assert.ThrowsAsync<AppException>(() =>
+            sut.SubmitAsync(
+                seed.ProviderUser.Id,
+                seed.Request.Id,
+                new SubmitBidRequest("500", 500, null, null, null),
+                CancellationToken.None));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Contains("ไม่ตรง", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task SubmitAsync_notifies_requester_not_provider()
     {

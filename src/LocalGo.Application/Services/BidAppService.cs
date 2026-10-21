@@ -25,6 +25,17 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
             throw new AppException("Request is not open for bids.", 409);
         }
 
+        var hasMatchingService = await db.ProviderServices.AsNoTracking()
+            .AnyAsync(
+                s => s.ProviderId == provider.Id
+                    && s.IsActive
+                    && s.CategoryId == serviceRequest.CategoryId,
+                cancellationToken);
+        if (!hasMatchingService)
+        {
+            throw new AppException("งานนี้ไม่ตรงกับบริการของคุณ", 400);
+        }
+
         var now = DateTime.UtcNow;
         var bid = await ResolveBidForSubmitAsync(provider.Id, requestId, request, price, now, cancellationToken);
 

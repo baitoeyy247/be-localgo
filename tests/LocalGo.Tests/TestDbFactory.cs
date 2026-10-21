@@ -640,6 +640,29 @@ internal static class TestDbFactory
             CreatedAt = now,
             UpdatedAt = now,
         };
+        var branch = new ProviderBranch
+        {
+            Id = Guid.NewGuid(),
+            ProviderId = provider.Id,
+            Name = "Main",
+            Latitude = 13.7563,
+            Longitude = 100.5018,
+            Location = GeoHelper.CreatePoint(13.7563, 100.5018),
+            ServiceRadiusMeters = 8000,
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        var service = new ProviderService
+        {
+            Id = Guid.NewGuid(),
+            ProviderId = provider.Id,
+            CategoryId = category.Id,
+            Title = "Bid Service",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
         var request = new ServiceRequest
         {
             Id = Guid.NewGuid(),
@@ -660,6 +683,16 @@ internal static class TestDbFactory
         db.Users.AddRange(requester, providerUser);
         db.ServiceCategories.Add(category);
         db.Providers.Add(provider);
+        db.ProviderBranches.Add(branch);
+        db.ProviderServices.Add(service);
+        db.ProviderServiceBranches.Add(new ProviderServiceBranch
+        {
+            Id = Guid.NewGuid(),
+            ProviderServiceId = service.Id,
+            ProviderBranchId = branch.Id,
+            IsActive = true,
+            CreatedAt = now,
+        });
         db.ServiceRequests.Add(request);
         await db.SaveChangesAsync();
 
