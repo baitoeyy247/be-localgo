@@ -121,6 +121,18 @@ if (isDevOrSit)
     }
 
     await DataSeeder.SeedAsync(db);
+
+    // One-shot SIT repair: move mis-assigned review onto QA ผู้ให้ 01 and drop stale BKK test rows.
+    try
+    {
+        var admin = scope.ServiceProvider.GetRequiredService<LocalGo.Application.Services.AdminAppService>();
+        await admin.RepairSitPlaytestDataAsync(CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitRepair");
+        logger.LogWarning(ex, "SIT playtest data repair skipped");
+    }
 }
 
 app.UseCors("LocalGoCors");

@@ -6,9 +6,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LocalGo.Application.Services;
 
-public sealed class AdminAppService(ILocalGoDbContext db)
+public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService reviews)
 {
     public const string TestUserLinePrefix = "dev-persona-";
+
+    /// <summary>Known SIT request whose verified review was attached to the wrong provider.</summary>
+    public static readonly Guid MisassignedReviewRequestId =
+        Guid.Parse("bf9b907c-aefa-4bc4-91e5-138958eff2f8");
 
     public async Task<AdminDashboardDto> GetDashboardAsync(CancellationToken cancellationToken)
     {
@@ -63,6 +67,77 @@ public sealed class AdminAppService(ILocalGoDbContext db)
         user.Status = parsed;
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Repairs the known mis-assigned review onto QA ผู้ให้ 01 (or the job's appointment provider)
+    /// and drops stale Bangkok-default / duplicate-title test marketplace rows.
+    /// </summary>
+    public async Task<object> RepairSitPlaytestDataAsync(CancellationToken cancellationToken)
+    {
+        var qaProviderId = await (
+            from p in db.Providers.AsNoTracking()
+            join u in db.Users.AsNoTracking() on p.OwnerUserId equals u.Id
+            where u.LineUserId == $"{TestUserLinePrefix}prov-01" || p.Name.Contains("ผู้ให้ 01")
+            orderby u.LineUserId == $"{TestUserLinePrefix}prov-01" ? 0 : 1
+            select (Guid?)p.Id
+        ).FirstOrDefaultAsync(cancellationToken);
+
+        var reassigned = await reviews.ReassignReviewForRequestAsync(
+            MisassignedReviewRequestId, qaProviderId, cancellationToken);
+
+        // Soft-clean leftover test requests that still use Bangkok map defaults or duplicated titles.
+        const double bkkLat = 13.7563;
+        const double bkkLng = 100.5018;
+        var testUserIds = await db.Users.AsNoTracking()
+            .Where(u => u.LineUserId.StartsWith(TestUserLinePrefix))
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
+
+        var candidates = await db.ServiceRequests
+            .Where(r => testUserIds.Contains(r.RequesterUserId)
+                && r.Status != ServiceRequestStatus.Completed
+                && r.Status != ServiceRequestStatus.InProgress)
+            .ToListAsync(cancellationToken);
+
+        var duplicateTitles = candidates
+            .GroupBy(r => (r.RequesterUserId, r.Title))
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g.OrderByDescending(x => x.CreatedAt).Skip(1))
+            .Select(r => r.Id)
+            .ToHashSet();
+
+        var stale = candidates
+            .Where(r =>
+                duplicateTitles.Contains(r.Id)
+                || (Math.Abs(r.Latitude - bkkLat) < 0.0002 && Math.Abs(r.Longitude - bkkLng) < 0.0002))
+            .ToList();
+
+        var staleIds = stale.Select(r => r.Id).ToList();
+        if (staleIds.Count > 0)
+        {
+            db.Appointments.RemoveRange(
+                await db.Appointments.Where(a => staleIds.Contains(a.ServiceRequestId)).ToListAsync(cancellationToken));
+            db.Bids.RemoveRange(
+                await db.Bids.Where(b => staleIds.Contains(b.ServiceRequestId)).ToListAsync(cancellationToken));
+            db.Reviews.RemoveRange(
+                await db.Reviews.Where(r => r.ServiceRequestId != null && staleIds.Contains(r.ServiceRequestId.Value))
+                    .ToListAsync(cancellationToken));
+            db.ServiceRequests.RemoveRange(stale);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        if (qaProviderId is Guid pid)
+        {
+            await reviews.RecalculateRatingsForProviderAsync(pid, cancellationToken);
+        }
+
+        return new
+        {
+            reviewReassigned = reassigned,
+            targetProviderId = qaProviderId,
+            staleRequestsRemoved = staleIds.Count,
+        };
     }
 
     public async Task<int> ResetTestDataAsync(CancellationToken cancellationToken)

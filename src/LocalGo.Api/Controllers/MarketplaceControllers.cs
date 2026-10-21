@@ -549,6 +549,10 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
         return Ok(new { deletedUsers = deleted });
     }
 
+    [HttpPost("test-data/repair")]
+    public async Task<IActionResult> RepairTestData(CancellationToken cancellationToken) =>
+        Ok(await admin.RepairSitPlaytestDataAsync(cancellationToken));
+
     [HttpGet("appointments")]
     public async Task<IActionResult> Appointments(
         [FromQuery] string? status,
