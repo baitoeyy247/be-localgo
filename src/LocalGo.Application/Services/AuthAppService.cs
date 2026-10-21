@@ -75,6 +75,7 @@ public sealed class AuthAppService(
         }
         else
         {
+            UserAccessGuards.EnsureCanSignIn(user);
             user.DisplayName = profile.DisplayName;
             user.PictureUrl = profile.PictureUrl;
             user.UpdatedAt = DateTime.UtcNow;

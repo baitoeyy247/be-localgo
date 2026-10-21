@@ -149,6 +149,7 @@ app.Use(async (context, next) =>
 });
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<SuspendedUserMiddleware>();
 app.MapControllers().RequireRateLimiting("api");
 
 app.Run();

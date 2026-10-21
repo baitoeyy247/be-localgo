@@ -28,6 +28,14 @@ public sealed class AppointmentAppService(
                 cancellationToken)
             ?? throw new AppException("Service not found.", 404);
 
+        var provider = await db.Providers.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == providerId, cancellationToken)
+            ?? throw new AppException("Provider not found.", 404);
+        if (provider.OwnerUserId == userId)
+        {
+            throw new AppException("ไม่สามารถจองบริการของตัวเองได้ กรุณาเลือกผู้ให้บริการรายอื่น", 400);
+        }
+
         if (request.Latitude is not double lat || request.Longitude is not double lng)
         {
             throw new AppException("Location is required for booking.", 400);

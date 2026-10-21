@@ -71,6 +71,7 @@ public sealed class DevAuthService(
         }
         else
         {
+            UserAccessGuards.EnsureCanSignIn(user);
             user.DisplayName = displayName;
             user.SystemRole = request.AsAdmin ? SystemRole.Admin : SystemRole.User;
             if (activeRole.HasValue)
@@ -78,7 +79,6 @@ public sealed class DevAuthService(
                 user.ActiveRole = activeRole;
             }
 
-            user.Status = UserStatus.Active;
             user.PrivacyNoticeAcceptedAt ??= DateTime.UtcNow;
             user.PrivacyNoticeVersion ??= "dev";
             user.LastLoginAt = DateTime.UtcNow;
