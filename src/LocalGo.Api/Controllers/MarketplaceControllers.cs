@@ -434,6 +434,14 @@ public sealed class BidsController(ICurrentUserService currentUser, BidAppServic
 [Authorize]
 public sealed class AppointmentsController(ICurrentUserService currentUser, AppointmentAppService appointments, IMapper mapper) : ControllerBase
 {
+    [HttpGet("{appointmentId:guid}")]
+    public async Task<IActionResult> Get(Guid appointmentId, CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        var appointment = await appointments.GetByIdAsync(userId, appointmentId, cancellationToken);
+        return Ok(mapper.Map<AppointmentResponseDto>(appointment));
+    }
+
     [HttpPatch("{appointmentId:guid}")]
     public async Task<IActionResult> Update(Guid appointmentId, [FromQuery] string status, CancellationToken cancellationToken)
     {
@@ -513,8 +521,73 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
         Ok(await admin.GetDashboardAsync(cancellationToken));
 
     [HttpGet("users")]
-    public async Task<IActionResult> Users(CancellationToken cancellationToken) =>
-        Ok(await admin.ListUsersAsync(cancellationToken));
+    public async Task<IActionResult> Users(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default) =>
+        Ok(await admin.ListUsersAsync(page, pageSize, cancellationToken));
+
+    [HttpPatch("users/{userId:guid}/status")]
+    public async Task<IActionResult> SetUserStatus(
+        Guid userId,
+        [FromBody] SetUserStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        await admin.SetUserStatusAsync(userId, request.Status, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("test-data/reset")]
+    public async Task<IActionResult> ResetTestData(CancellationToken cancellationToken)
+    {
+        var deleted = await admin.ResetTestDataAsync(cancellationToken);
+        return Ok(new { deletedUsers = deleted });
+    }
+
+    [HttpGet("appointments")]
+    public async Task<IActionResult> Appointments(
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
+    {
+        var query = db.Appointments.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(status)
+            && Enum.TryParse<AppointmentStatus>(status, true, out var parsed))
+        {
+            query = query.Where(a => a.Status == parsed);
+        }
+
+        var rows = await query
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(100)
+            .Select(a => new
+            {
+                a.Id,
+                a.ServiceRequestId,
+                a.ProviderId,
+                a.RequesterUserId,
+                a.ScheduledAt,
+                a.AddressText,
+                a.Status,
+                a.Note,
+                a.CreatedAt,
+                a.UpdatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(rows.Select(a => new
+        {
+            a.Id,
+            a.ServiceRequestId,
+            a.ProviderId,
+            a.RequesterUserId,
+            a.ScheduledAt,
+            a.AddressText,
+            Status = a.Status.ToString(),
+            a.Note,
+            a.CreatedAt,
+            a.UpdatedAt,
+        }));
+    }
 
     [HttpGet("providers")]
     public async Task<IActionResult> Providers(CancellationToken cancellationToken)
@@ -553,9 +626,18 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
     }
 
     [HttpGet("service-requests")]
-    public async Task<IActionResult> ServiceRequests(CancellationToken cancellationToken)
+    public async Task<IActionResult> ServiceRequests(
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
     {
-        var rows = await db.ServiceRequests.AsNoTracking()
+        var query = db.ServiceRequests.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(status)
+            && Enum.TryParse<ServiceRequestStatus>(status, true, out var parsed))
+        {
+            query = query.Where(r => r.Status == parsed);
+        }
+
+        var rows = await query
             .OrderByDescending(r => r.CreatedAt)
             .Take(100)
             .Select(r => new

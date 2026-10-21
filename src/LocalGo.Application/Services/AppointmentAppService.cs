@@ -138,6 +138,25 @@ public sealed class AppointmentAppService(
                 cancellationToken);
     }
 
+    /// <summary>Loads an appointment by id for a participant (requester or provider owner).</summary>
+    public async Task<Appointment> GetByIdAsync(Guid userId, Guid appointmentId, CancellationToken cancellationToken)
+    {
+        var appointment = await db.Appointments.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == appointmentId, cancellationToken)
+            ?? throw new AppException("ไม่พบหรือไม่มีสิทธิ์เข้าถึง", 404);
+
+        try
+        {
+            await MarketplaceAccess.EnsureAppointmentParticipantAsync(db, userId, appointment, cancellationToken);
+        }
+        catch (AppException)
+        {
+            throw new AppException("ไม่พบหรือไม่มีสิทธิ์เข้าถึง", 404);
+        }
+
+        return appointment;
+    }
+
     /// <summary>Updates appointment status; request status follows appointment lifecycle.</summary>
     public async Task<Appointment> UpdateStatusAsync(
         Guid userId, Guid appointmentId, AppointmentStatus status, CancellationToken cancellationToken)

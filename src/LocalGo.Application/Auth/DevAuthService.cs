@@ -15,6 +15,15 @@ public sealed class DevAuthService(
         "^[a-z0-9][a-z0-9-]{0,31}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    /// <summary>Personas that should start with a provider profile shell (M6).</summary>
+    private static readonly HashSet<string> SeedProviderPersonas = new(StringComparer.Ordinal)
+    {
+        "prov-01",
+        "prov-02",
+        "prov-03",
+        "both-02",
+    };
+
     public async Task<AuthResponse> LoginAsync(DevLoginRequest request, CancellationToken cancellationToken)
     {
         var displayName = string.IsNullOrWhiteSpace(request.DisplayName)
@@ -75,6 +84,11 @@ public sealed class DevAuthService(
 
         await db.SaveChangesAsync(cancellationToken);
 
+        if (personaKey is not null && SeedProviderPersonas.Contains(personaKey))
+        {
+            await EnsureProviderProfileAsync(user, cancellationToken);
+        }
+
         return new AuthResponse
         {
             AccessToken = tokenGenerator.GenerateToken(user),
@@ -88,6 +102,29 @@ public sealed class DevAuthService(
             .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
         return user is null ? null : MapUser(user);
+    }
+
+    private async Task EnsureProviderProfileAsync(User user, CancellationToken cancellationToken)
+    {
+        var exists = await db.Providers.AnyAsync(p => p.OwnerUserId == user.Id, cancellationToken);
+        if (exists)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        db.Providers.Add(new Provider
+        {
+            Id = Guid.NewGuid(),
+            OwnerUserId = user.Id,
+            ProviderType = ProviderType.Individual,
+            Name = user.DisplayName,
+            Description = "โปรไฟล์ทดสอบ — สลับบทบาทได้โดยไม่ลบข้อมูลเดิม",
+            Status = ProviderStatus.Active,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static string? NormalizePersonaKey(string? raw)

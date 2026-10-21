@@ -134,7 +134,17 @@ public sealed record AdminUserDto(
     Guid Id,
     string DisplayName,
     string LineUserId,
-    string SystemRole);
+    string SystemRole,
+    string Status = "Active",
+    bool IsTestUser = false);
+
+public sealed record AdminUsersPageDto(
+    IReadOnlyList<AdminUserDto> Items,
+    int Total,
+    int Page,
+    int PageSize);
+
+public sealed record SetUserStatusRequest(string Status);
 
 public sealed record AdminDashboardDto(
     int Users,
