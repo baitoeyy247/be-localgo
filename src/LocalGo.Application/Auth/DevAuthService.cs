@@ -27,9 +27,12 @@ public sealed class DevAuthService(
 
     public async Task<AuthResponse> LoginAsync(DevLoginRequest request, CancellationToken cancellationToken)
     {
-        var displayName = string.IsNullOrWhiteSpace(request.DisplayName)
-            ? "Dev User"
-            : request.DisplayName.Trim();
+        var personaKey = NormalizePersonaKey(request.PersonaKey);
+        var displayName = personaKey is not null && PlaytestPersonas.TryGetDisplayName(personaKey, out var canonical)
+            ? canonical
+            : string.IsNullOrWhiteSpace(request.DisplayName)
+                ? "Dev User"
+                : request.DisplayName.Trim();
 
         AppRole? activeRole = null;
         if (!string.IsNullOrWhiteSpace(request.ActiveRole) &&
@@ -38,7 +41,6 @@ public sealed class DevAuthService(
             activeRole = parsed;
         }
 
-        var personaKey = NormalizePersonaKey(request.PersonaKey);
         var lineUserId = personaKey is null
             ? $"dev-{Guid.NewGuid():N}"
             : $"dev-persona-{personaKey}";
@@ -88,6 +90,17 @@ public sealed class DevAuthService(
         if (personaKey is not null && SeedProviderPersonas.Contains(personaKey))
         {
             await EnsureProviderProfileAsync(user, cancellationToken);
+            if (PlaytestPersonas.UsesProviderProfileName(personaKey)
+                && PlaytestPersonas.TryGetDisplayName(personaKey, out var providerLabel))
+            {
+                var provider = await db.Providers.FirstOrDefaultAsync(p => p.OwnerUserId == user.Id, cancellationToken);
+                if (provider is not null && provider.Name != providerLabel)
+                {
+                    provider.Name = providerLabel;
+                    provider.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+            }
         }
 
         return new AuthResponse

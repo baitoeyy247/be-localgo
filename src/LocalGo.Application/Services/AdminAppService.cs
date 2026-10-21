@@ -17,12 +17,16 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
     public async Task<AdminDashboardDto> GetDashboardAsync(CancellationToken cancellationToken)
     {
         return new AdminDashboardDto(
-            await db.Users.CountAsync(cancellationToken),
-            await db.Providers.CountAsync(cancellationToken),
-            await db.ServiceRequests.CountAsync(r => r.Status != ServiceRequestStatus.Draft, cancellationToken),
-            await db.ServiceRequests.CountAsync(r => r.Status == ServiceRequestStatus.Completed, cancellationToken),
-            await db.ServiceRequests.CountAsync(r => r.Status == ServiceRequestStatus.Expired, cancellationToken),
-            await db.NotificationLogs.CountAsync(n => n.Status == NotificationStatus.Pending, cancellationToken));
+            await db.Users.AsNoTracking().CountAsync(cancellationToken),
+            await db.Providers.AsNoTracking().CountAsync(cancellationToken),
+            await db.ServiceRequests.AsNoTracking()
+                .CountAsync(r => r.Status != ServiceRequestStatus.Draft, cancellationToken),
+            await db.ServiceRequests.AsNoTracking()
+                .CountAsync(r => r.Status == ServiceRequestStatus.Completed, cancellationToken),
+            await db.ServiceRequests.AsNoTracking()
+                .CountAsync(r => r.Status == ServiceRequestStatus.Expired, cancellationToken),
+            await db.NotificationLogs.AsNoTracking()
+                .CountAsync(n => n.Status == NotificationStatus.Pending, cancellationToken));
     }
 
     public async Task<AdminUsersPageDto> ListUsersAsync(int page, int pageSize, CancellationToken cancellationToken)
@@ -226,6 +230,8 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await DeletePlaytestMarketplaceRowsAsync(userIds, providerIds, requestIds, cancellationToken);
         }
 
+        await SyncPlaytestPersonaLabelsAsync(cancellationToken);
+
         var sampleReviewsSeeded = await reviews.SeedQaProvider01SampleReviewsAsync(cancellationToken);
         var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
 
@@ -238,6 +244,67 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             sampleReviewsSeeded,
             providersRecalculated = providersTouched,
         };
+    }
+
+    /// <summary>Align dev-persona display names (and provider names) with the QA playtest catalog.</summary>
+    public async Task<int> SyncPlaytestPersonaLabelsAsync(CancellationToken cancellationToken)
+    {
+        var users = await db.Users
+            .Where(u => u.LineUserId.StartsWith(TestUserLinePrefix))
+            .ToListAsync(cancellationToken);
+        if (users.Count == 0)
+        {
+            return 0;
+        }
+
+        var now = DateTime.UtcNow;
+        var touched = 0;
+        foreach (var user in users)
+        {
+            var key = user.LineUserId[TestUserLinePrefix.Length..];
+            if (!PlaytestPersonas.TryGetDisplayName(key, out var label))
+            {
+                continue;
+            }
+
+            if (!string.Equals(user.DisplayName, label, StringComparison.Ordinal))
+            {
+                user.DisplayName = label;
+                user.UpdatedAt = now;
+                touched++;
+            }
+        }
+
+        var userIds = users.Select(u => u.Id).ToHashSet();
+        var providers = await db.Providers.Where(p => userIds.Contains(p.OwnerUserId)).ToListAsync(cancellationToken);
+        foreach (var provider in providers)
+        {
+            var owner = users.First(u => u.Id == provider.OwnerUserId);
+            var key = owner.LineUserId[TestUserLinePrefix.Length..];
+            if (!PlaytestPersonas.UsesProviderProfileName(key))
+            {
+                continue;
+            }
+
+            if (!PlaytestPersonas.TryGetDisplayName(key, out var label))
+            {
+                continue;
+            }
+
+            if (!string.Equals(provider.Name, label, StringComparison.Ordinal))
+            {
+                provider.Name = label;
+                provider.UpdatedAt = now;
+                touched++;
+            }
+        }
+
+        if (touched > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return touched;
     }
 
     private async Task DeletePlaytestMarketplaceRowsAsync(

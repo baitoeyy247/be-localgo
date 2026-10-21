@@ -16,7 +16,7 @@ public sealed class ReviewSeedTests
         {
             Id = Guid.NewGuid(),
             LineUserId = $"{AdminAppService.TestUserLinePrefix}prov-01",
-            DisplayName = "ทดสอบ ผู้ให้ 01",
+            DisplayName = "QA ผู้ให้ 01",
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -24,7 +24,7 @@ public sealed class ReviewSeedTests
         {
             Id = Guid.NewGuid(),
             LineUserId = $"{AdminAppService.TestUserLinePrefix}req-01",
-            DisplayName = "ทดสอบ ผู้รับ 01",
+            DisplayName = "QA ผู้รับ 01",
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -32,7 +32,7 @@ public sealed class ReviewSeedTests
         {
             Id = Guid.NewGuid(),
             LineUserId = $"{AdminAppService.TestUserLinePrefix}req-02",
-            DisplayName = "ทดสอบ ผู้รับ 02",
+            DisplayName = "QA ผู้รับ 02",
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -41,7 +41,7 @@ public sealed class ReviewSeedTests
             Id = Guid.NewGuid(),
             OwnerUserId = provUser.Id,
             ProviderType = ProviderType.Individual,
-            Name = "ทดสอบ ผู้ให้ 01",
+            Name = "QA ผู้ให้ 01",
             Status = ProviderStatus.Active,
             CreatedAt = now,
             UpdatedAt = now,

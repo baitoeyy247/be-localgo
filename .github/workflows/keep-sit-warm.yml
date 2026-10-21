@@ -19,3 +19,6 @@ jobs:
           echo "==> GET categories (public)"
           curl -fsS --retry 1 --max-time 90 -o /dev/null -w "time_total=%{time_total}s http=%{http_code}\n" \
             "$BASE/categories"
+          echo "==> GET search/providers (public, warms geo query)"
+          curl -fsS --retry 1 --max-time 90 -o /dev/null -w "time_total=%{time_total}s http=%{http_code}\n" \
+            "$BASE/search/providers?lat=16.185&lng=103.302&radiusMeters=5000"
