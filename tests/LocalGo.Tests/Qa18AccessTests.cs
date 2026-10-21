@@ -107,6 +107,34 @@ public sealed class Qa18AccessTests
         Assert.Equal(403, ex.StatusCode);
     }
 
+    [Fact]
+    public async Task StartAsync_blocks_before_appointment_window()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db, withPendingAppointment: true);
+        var notifications = TestDbFactory.NoopNotifications();
+        var appointments = new AppointmentAppService(
+            db,
+            notifications,
+            NullLogger<AppointmentAppService>.Instance);
+        var requests = new ServiceRequestAppService(
+            db,
+            notifications,
+            NullLogger<ServiceRequestAppService>.Instance);
+
+        await appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id,
+            seed.Appointment!.Id,
+            AppointmentStatus.Confirmed,
+            null,
+            CancellationToken.None);
+
+        var ex = await Assert.ThrowsAsync<AppException>(() =>
+            requests.StartAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None));
+
+        Assert.Equal(409, ex.StatusCode);
+    }
+
     private sealed class FakeJwt : IJwtTokenGenerator
     {
         public string GenerateToken(User user) => "test-token";
