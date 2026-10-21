@@ -269,4 +269,133 @@ public sealed class MarketplaceFlowTests
         Assert.Equal(AppointmentStatus.Completed, appointment.Status);
         Assert.Equal(ServiceRequestStatus.Completed, seed.Request.Status);
     }
+
+    [Fact]
+    public async Task BookFromProviderService_creates_appointment_with_null_decline_reason()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var now = DateTime.UtcNow;
+        var requester = new Domain.Entities.User
+        {
+            Id = Guid.NewGuid(),
+            LineUserId = $"line-book-{Guid.NewGuid():N}",
+            DisplayName = "Booker",
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        var providerUser = new Domain.Entities.User
+        {
+            Id = Guid.NewGuid(),
+            LineUserId = $"line-book-prov-{Guid.NewGuid():N}",
+            DisplayName = "Book Provider",
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        var category = new Domain.Entities.ServiceCategory
+        {
+            Id = Guid.NewGuid(),
+            Name = "Book Cat",
+            Slug = $"book-{Guid.NewGuid():N}",
+            SortOrder = 1,
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        var provider = new Domain.Entities.Provider
+        {
+            Id = Guid.NewGuid(),
+            OwnerUserId = providerUser.Id,
+            ProviderType = ProviderType.Individual,
+            Name = "Book Co",
+            Status = ProviderStatus.Active,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        var service = new Domain.Entities.ProviderService
+        {
+            Id = Guid.NewGuid(),
+            ProviderId = provider.Id,
+            CategoryId = category.Id,
+            Title = "Bookable Service",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.Users.AddRange(requester, providerUser);
+        db.ServiceCategories.Add(category);
+        db.Providers.Add(provider);
+        db.ProviderServices.Add(service);
+        await db.SaveChangesAsync();
+
+        var appointments = new AppointmentAppService(
+            db,
+            TestDbFactory.NoopNotifications(),
+            NullLogger<AppointmentAppService>.Instance);
+
+        var appointment = await appointments.BookFromProviderServiceAsync(
+            requester.Id,
+            provider.Id,
+            service.Id,
+            new CreateAppointmentRequest(
+                now.AddDays(1),
+                "123 Test Rd",
+                13.7563,
+                100.5018,
+                "note only"),
+            CancellationToken.None);
+
+        Assert.Equal(AppointmentStatus.Pending, appointment.Status);
+        Assert.Null(appointment.DeclineReason);
+        Assert.Equal("note only", appointment.Note);
+
+        // Same projection shape as GET /api/admin/appointments — must not throw on DeclineReason.
+        var adminRows = await db.Appointments.AsNoTracking()
+            .Where(a => a.Id == appointment.Id)
+            .Select(a => new
+            {
+                a.Id,
+                a.Note,
+                a.DeclineReason,
+                Status = a.Status.ToString(),
+            })
+            .ToListAsync();
+
+        Assert.Single(adminRows);
+        Assert.Null(adminRows[0].DeclineReason);
+        Assert.Equal("note only", adminRows[0].Note);
+    }
+
+    [Fact]
+    public async Task Reject_stores_decline_reason_separate_from_note_and_admin_can_read_it()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db, withPendingAppointment: true);
+        seed.Appointment!.Note = "โน้ตภายใน";
+        await db.SaveChangesAsync();
+
+        var appointments = new AppointmentAppService(
+            db,
+            TestDbFactory.NoopNotifications(),
+            NullLogger<AppointmentAppService>.Instance);
+
+        var rejected = await appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id,
+            seed.Appointment.Id,
+            AppointmentStatus.Rejected,
+            "ไม่ว่างช่วงนี้",
+            CancellationToken.None);
+
+        Assert.Equal(AppointmentStatus.Rejected, rejected.Status);
+        Assert.Equal("ไม่ว่างช่วงนี้", rejected.DeclineReason);
+        Assert.Equal("โน้ตภายใน", rejected.Note);
+
+        var adminRow = await db.Appointments.AsNoTracking()
+            .Where(a => a.Id == rejected.Id)
+            .Select(a => new { a.DeclineReason, a.Note, a.Status })
+            .SingleAsync();
+
+        Assert.Equal(AppointmentStatus.Rejected, adminRow.Status);
+        Assert.Equal("ไม่ว่างช่วงนี้", adminRow.DeclineReason);
+        Assert.Equal("โน้ตภายใน", adminRow.Note);
+    }
 }

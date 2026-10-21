@@ -120,6 +120,18 @@ if (isDevOrSit)
             ex);
     }
 
+    // Belt-and-suspenders: ensure DeclineReason exists even if a prior build skipped the migration.
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE appointments ADD COLUMN IF NOT EXISTS "DeclineReason" character varying(2000) NULL;""");
+    }
+    catch (Exception ex)
+    {
+        var migrateLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitMigrate");
+        migrateLogger.LogWarning(ex, "Ensure DeclineReason column skipped");
+    }
+
     await DataSeeder.SeedAsync(db);
 
     // One-shot SIT repair: move mis-assigned review onto QA ผู้ให้ 01 and drop stale BKK test rows.

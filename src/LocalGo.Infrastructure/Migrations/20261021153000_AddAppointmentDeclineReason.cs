@@ -1,22 +1,29 @@
+using LocalGo.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace LocalGo.Infrastructure.Migrations;
 
-public class AddAppointmentDeclineReason : Migration
+/// <summary>
+/// Adds appointments.DeclineReason. Must carry [Migration] so MigrateAsync discovers it
+/// (a Designer-less Migration without the attribute is skipped → 500 on SELECT DeclineReason).
+/// </summary>
+[DbContext(typeof(LocalGoDbContext))]
+[Migration("20261021153000_AddAppointmentDeclineReason")]
+public partial class AddAppointmentDeclineReason : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.AddColumn<string>(
-            name: "DeclineReason",
-            table: "appointments",
-            type: "character varying(2000)",
-            maxLength: 2000,
-            nullable: true);
+        // Idempotent: safe if a previous deploy applied the column manually.
+        migrationBuilder.Sql(
+            """
+            ALTER TABLE appointments
+            ADD COLUMN IF NOT EXISTS "DeclineReason" character varying(2000) NULL;
+            """);
 
-        // Split legacy "เหตุผลที่ปฏิเสธ: …" suffixes out of Note into DeclineReason.
         migrationBuilder.Sql(
             """
             UPDATE appointments
@@ -42,8 +49,9 @@ public class AddAppointmentDeclineReason : Migration
             WHERE "DeclineReason" IS NOT NULL AND TRIM("DeclineReason") <> '';
             """);
 
-        migrationBuilder.DropColumn(
-            name: "DeclineReason",
-            table: "appointments");
+        migrationBuilder.Sql(
+            """
+            ALTER TABLE appointments DROP COLUMN IF EXISTS "DeclineReason";
+            """);
     }
 }

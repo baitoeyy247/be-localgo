@@ -32,7 +32,9 @@ public sealed class AdminUserListTests
             });
         await db.SaveChangesAsync();
 
-        var users = await new AdminAppService(db).ListUsersAsync(CancellationToken.None);
+        var users = await new AdminAppService(
+            db,
+            new ReviewAppService(db, TestDbFactory.NoopNotifications())).ListUsersAsync(CancellationToken.None);
 
         Assert.Equal(2, users.Count);
         Assert.Equal(users.Count, users.Select(u => u.Id).Distinct().Count());

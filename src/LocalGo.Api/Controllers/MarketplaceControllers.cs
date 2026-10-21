@@ -64,7 +64,9 @@ public sealed class ProvidersController(ICurrentUserService currentUser, Provide
         var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
         var appointment = await appointments.BookFromProviderServiceAsync(
             userId, providerId, serviceId, request, cancellationToken);
-        return Ok(new { appointmentId = appointment.Id, serviceRequestId = appointment.ServiceRequestId });
+        return StatusCode(
+            StatusCodes.Status201Created,
+            new { appointmentId = appointment.Id, serviceRequestId = appointment.ServiceRequestId });
     }
 
     [HttpPatch("{providerId:guid}")]

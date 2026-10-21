@@ -59,7 +59,9 @@ public sealed class RemainingQaTests
         db.Providers.Add(provider);
         await db.SaveChangesAsync();
 
-        var rows = await new AdminAppService(db).ListUsersAsync(CancellationToken.None);
+        var rows = await new AdminAppService(
+            db,
+            new ReviewAppService(db, TestDbFactory.NoopNotifications())).ListUsersAsync(CancellationToken.None);
         var matches = rows.Where(row => row.Id == user.Id).ToList();
 
         Assert.Single(matches);
