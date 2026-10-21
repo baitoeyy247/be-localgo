@@ -137,7 +137,9 @@ public sealed record AdminUserDto(
     string LineUserId,
     string SystemRole,
     string Status = "Active",
-    bool IsTestUser = false);
+    bool IsTestUser = false,
+    string? ActiveRole = null,
+    bool HasProviderProfile = false);
 
 public sealed record AdminUsersPageDto(
     IReadOnlyList<AdminUserDto> Items,

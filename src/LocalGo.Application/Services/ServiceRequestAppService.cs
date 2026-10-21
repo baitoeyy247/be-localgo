@@ -427,22 +427,13 @@ public sealed class ServiceRequestAppService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Start and complete stay blocked until one hour before the appointment time.</summary>
     private async Task EnsureAppointmentWindowAsync(Guid requestId, CancellationToken cancellationToken)
     {
         var scheduledAt = await db.Appointments.AsNoTracking()
             .Where(a => a.ServiceRequestId == requestId && a.Status != AppointmentStatus.Cancelled)
             .Select(a => a.ScheduledAt)
             .FirstOrDefaultAsync(cancellationToken);
-        if (scheduledAt is null)
-        {
-            throw new AppException("ยังไม่ถึงเวลานัด จึงเริ่มหรือปิดงานไม่ได้", 409);
-        }
-
-        if (DateTime.UtcNow < scheduledAt.Value.AddHours(-1))
-        {
-            throw new AppException("ยังไม่ถึงเวลานัด จึงเริ่มหรือปิดงานไม่ได้", 409);
-        }
+        AppointmentStartWindow.EnsureCanStartOrComplete(scheduledAt);
     }
 
     public async Task<int> CountPendingConfirmationsAsync(Guid userId, CancellationToken cancellationToken) =>

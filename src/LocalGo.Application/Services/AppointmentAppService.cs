@@ -192,6 +192,7 @@ public sealed class AppointmentAppService(
 
         // Include Cancelled/Rejected so both parties see the terminal status after refresh.
         return await db.Appointments.AsNoTracking()
+            .Include(a => a.Provider)
             .FirstOrDefaultAsync(a => a.ServiceRequestId == requestId, cancellationToken);
     }
 
@@ -199,6 +200,7 @@ public sealed class AppointmentAppService(
     public async Task<Appointment> GetByIdAsync(Guid userId, Guid appointmentId, CancellationToken cancellationToken)
     {
         var appointment = await db.Appointments.AsNoTracking()
+            .Include(a => a.Provider)
             .FirstOrDefaultAsync(a => a.Id == appointmentId, cancellationToken)
             ?? throw new AppException("ไม่พบหรือไม่มีสิทธิ์เข้าถึง", 404);
 
@@ -240,11 +242,7 @@ public sealed class AppointmentAppService(
         EnsureTransition(appointment.Status, status, isProvider);
         if (status is AppointmentStatus.InProgress or AppointmentStatus.Completed)
         {
-            var skipWindow = await IsTestPersonaUserAsync(userId, cancellationToken);
-            if (!skipWindow)
-            {
-                EnsureAppointmentWindow(appointment.ScheduledAt);
-            }
+            AppointmentStartWindow.EnsureCanStartOrComplete(appointment.ScheduledAt);
         }
 
         if (status == AppointmentStatus.Rejected)
@@ -272,16 +270,6 @@ public sealed class AppointmentAppService(
         }
 
         return appointment;
-    }
-
-    private async Task<bool> IsTestPersonaUserAsync(Guid userId, CancellationToken cancellationToken)
-    {
-        var lineUserId = await db.Users.AsNoTracking()
-            .Where(u => u.Id == userId)
-            .Select(u => u.LineUserId)
-            .FirstOrDefaultAsync(cancellationToken);
-        return lineUserId is not null
-            && lineUserId.StartsWith(AdminAppService.TestUserLinePrefix, StringComparison.Ordinal);
     }
 
     private async Task<Appointment> UpsertExistingAppointmentAsync(
@@ -358,15 +346,6 @@ public sealed class AppointmentAppService(
             ? utcOrUnspecified
             : DateTime.SpecifyKind(utcOrUnspecified, DateTimeKind.Utc);
         return utc.AddHours(7).ToString("d MMM yyyy HH:mm", new System.Globalization.CultureInfo("th-TH"));
-    }
-
-    /// <summary>Work cannot start or finish earlier than one hour before the appointment.</summary>
-    private static void EnsureAppointmentWindow(DateTime? scheduledAt)
-    {
-        if (scheduledAt is null || DateTime.UtcNow < scheduledAt.Value.AddHours(-1))
-        {
-            throw new AppException("ยังไม่ถึงเวลานัด จึงเริ่มหรือปิดงานไม่ได้", 409);
-        }
     }
 
     /// <summary>

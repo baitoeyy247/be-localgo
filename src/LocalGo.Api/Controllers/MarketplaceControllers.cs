@@ -248,6 +248,20 @@ public sealed class ServiceRequestsController(
         return Ok(await requests.ListMineAsync(userId, cancellationToken));
     }
 
+    [HttpGet("{requestId:guid}/bid-form")]
+    public async Task<IActionResult> BidForm(Guid requestId, CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        var access = await requests.GetBidFormAsync(userId, requestId, cancellationToken);
+        return Ok(new
+        {
+            allowed = access.Allowed,
+            reason = access.Reason,
+            reasonCode = access.ReasonCode,
+            request = access.Request is null ? null : mapper.Map<ServiceRequestResponseDto>(access.Request),
+        });
+    }
+
     [HttpGet("{requestId:guid}")]
     public async Task<IActionResult> Get(Guid requestId, CancellationToken cancellationToken)
     {

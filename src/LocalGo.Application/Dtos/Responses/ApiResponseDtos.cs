@@ -116,6 +116,7 @@ public sealed class AppointmentResponseDto
     public Guid Id { get; init; }
     public Guid ServiceRequestId { get; init; }
     public Guid ProviderId { get; init; }
+    public string? ProviderName { get; init; }
     public Guid RequesterUserId { get; init; }
     public DateTime? ScheduledAt { get; init; }
     public string? AddressText { get; init; }

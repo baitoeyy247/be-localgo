@@ -152,7 +152,7 @@ public sealed class RemainingQaTests
             sut.StartAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None));
 
         Assert.Equal(409, ex.StatusCode);
-        Assert.Contains("ยังไม่ถึงเวลานัด", ex.Message);
+        Assert.Contains("เริ่มงานได้ตั้งแต่", ex.Message);
     }
 
     [Fact]

@@ -50,7 +50,9 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
                 u.LineUserId,
                 u.SystemRole.ToString(),
                 u.Status.ToString(),
-                u.LineUserId.StartsWith(TestUserLinePrefix)))
+                u.LineUserId.StartsWith(TestUserLinePrefix),
+                u.ActiveRole.HasValue ? u.ActiveRole.Value.ToString() : null,
+                db.Providers.Any(p => p.OwnerUserId == u.Id)))
             .ToListAsync(cancellationToken);
 
         return new AdminUsersPageDto(rows.DistinctBy(u => u.Id).ToList(), total, page, pageSize);
