@@ -92,6 +92,14 @@ public sealed class ProvidersController(ICurrentUserService currentUser, Provide
         });
     }
 
+    [HttpDelete("{providerId:guid}/branches/{branchId:guid}")]
+    public async Task<IActionResult> DeleteBranch(Guid providerId, Guid branchId, CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        await providers.DeleteBranchAsync(userId, providerId, branchId, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPatch("{providerId:guid}/branches/{branchId:guid}")]
     public async Task<IActionResult> UpdateBranch(Guid providerId, Guid branchId, [FromBody] BranchRequest request, CancellationToken cancellationToken)
     {
@@ -347,6 +355,14 @@ public sealed class ProviderMatchingController(
     IWebHostEnvironment environment,
     IMapper mapper) : ControllerBase
 {
+    [HttpGet("/api/provider/summary")]
+    public async Task<IActionResult> Summary(CancellationToken cancellationToken)
+    {
+        var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
+        var pending = await requests.CountPendingConfirmationsAsync(userId, cancellationToken);
+        return Ok(new { pendingConfirmCount = pending });
+    }
+
     [HttpGet("matching")]
     public async Task<IActionResult> Matching(CancellationToken cancellationToken)
     {

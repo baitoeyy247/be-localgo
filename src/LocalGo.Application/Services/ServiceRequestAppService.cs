@@ -136,6 +136,25 @@ public sealed class ServiceRequestAppService(
             })
             .ToListAsync(cancellationToken);
 
+        var ids = rows.Select(r => r.Id).ToArray();
+        var reviews = ids.Length == 0
+            ? []
+            : await db.Reviews.AsNoTracking()
+                .Where(r => r.ReviewerUserId == userId && r.ServiceRequestId != null && ids.Contains(r.ServiceRequestId.Value))
+                .Select(r => new { r.ServiceRequestId, r.Rating })
+                .ToListAsync(cancellationToken);
+        var appointments = ids.Length == 0
+            ? []
+            : await db.Appointments.AsNoTracking()
+                .Where(a => ids.Contains(a.ServiceRequestId) && a.Status != AppointmentStatus.Cancelled)
+                .Select(a => new { a.ServiceRequestId, a.Status })
+                .ToListAsync(cancellationToken);
+        var reviewByRequest = reviews
+            .Where(r => r.ServiceRequestId.HasValue)
+            .GroupBy(r => r.ServiceRequestId!.Value)
+            .ToDictionary(g => g.Key, g => g.First().Rating);
+        var appointmentByRequest = appointments.ToDictionary(a => a.ServiceRequestId, a => a.Status.ToString());
+
         return rows
             .Select(r => new ServiceRequestSummaryDto(
                 r.Id,
@@ -144,7 +163,10 @@ public sealed class ServiceRequestAppService(
                 r.CategoryName,
                 r.CreatedAt,
                 r.BidCount,
-                r.BudgetText))
+                r.BudgetText,
+                HasReviewed: reviewByRequest.ContainsKey(r.Id),
+                MyReviewRating: reviewByRequest.TryGetValue(r.Id, out var rating) ? rating : null,
+                AppointmentStatus: appointmentByRequest.TryGetValue(r.Id, out var appointmentStatus) ? appointmentStatus : null))
             .ToList();
     }
 
@@ -264,9 +286,8 @@ public sealed class ServiceRequestAppService(
         }
 
         var coverageLinks = await LoadCoverageLinksAsync(provider.Id, cancellationToken);
-        var results = new List<ServiceRequestSummaryDto>();
-        var seenIds = new HashSet<Guid>();
-
+        var open = new List<ServiceRequestSummaryDto>();
+        var openIds = new HashSet<Guid>();
         if (coverageLinks.Count > 0)
         {
             await AppendOpenMatchingRequestsAsync(
@@ -275,28 +296,32 @@ public sealed class ServiceRequestAppService(
                 coverageLinks,
                 excludeSmokeTestData,
                 includeOwnRequests,
-                results,
-                seenIds,
+                open,
+                openIds,
                 cancellationToken);
         }
 
+        var mine = new List<ServiceRequestSummaryDto>();
+        var mineIds = new HashSet<Guid>();
         await AppendActiveEngagementsAsync(
             provider,
             userId,
             coverageLinks,
             excludeSmokeTestData,
             includeOwnRequests,
-            results,
-            seenIds,
+            mine,
+            mineIds,
             cancellationToken);
 
-        var items = results
-            .OrderByDescending(r => ProviderActiveEngagementStatuses.Any(s => s.ToString() == r.Status))
-            .ThenByDescending(r => r.CreatedAt)
+        var items = open
+            .OrderByDescending(r => r.CreatedAt)
             .ThenBy(r => r.DistanceMeters)
             .ToList();
+        var myJobs = mine
+            .OrderByDescending(r => r.CreatedAt)
+            .ToList();
 
-        return new ProviderMatchingInboxDto(items, excludesOwnRequests, DistinctAreas(coverageLinks));
+        return new ProviderMatchingInboxDto(items, excludesOwnRequests, DistinctAreas(coverageLinks), myJobs);
     }
 
     /// <summary>Cancels a request owned by the current user and tells bidders.</summary>
@@ -367,6 +392,7 @@ public sealed class ServiceRequestAppService(
         var entity = await db.ServiceRequests.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
         await MarketplaceAccess.EnsureServiceRequestParticipantAsync(db, userId, entity, cancellationToken);
+        await EnsureAppointmentWindowAsync(entity.Id, cancellationToken);
         await MoveActiveAppointmentAsync(
             userId,
             entity.Id,
@@ -385,6 +411,7 @@ public sealed class ServiceRequestAppService(
         var entity = await db.ServiceRequests.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
         await MarketplaceAccess.EnsureServiceRequestParticipantAsync(db, userId, entity, cancellationToken);
+        await EnsureAppointmentWindowAsync(entity.Id, cancellationToken);
         await MoveActiveAppointmentAsync(
             userId,
             entity.Id,
@@ -396,6 +423,30 @@ public sealed class ServiceRequestAppService(
         ProgressHelper.Touch(entity);
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    /// <summary>Start and complete stay blocked until one hour before the appointment time.</summary>
+    private async Task EnsureAppointmentWindowAsync(Guid requestId, CancellationToken cancellationToken)
+    {
+        var scheduledAt = await db.Appointments.AsNoTracking()
+            .Where(a => a.ServiceRequestId == requestId && a.Status != AppointmentStatus.Cancelled)
+            .Select(a => a.ScheduledAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (scheduledAt is null)
+        {
+            throw new AppException("ยังไม่ถึงเวลานัด จึงเริ่มหรือปิดงานไม่ได้", 409);
+        }
+
+        if (DateTime.UtcNow < scheduledAt.Value.AddHours(-1))
+        {
+            throw new AppException("ยังไม่ถึงเวลานัด จึงเริ่มหรือปิดงานไม่ได้", 409);
+        }
+    }
+
+    public async Task<int> CountPendingConfirmationsAsync(Guid userId, CancellationToken cancellationToken) =>
+        await db.Appointments.CountAsync(
+            a => a.Status == AppointmentStatus.Pending
+                && db.Providers.Any(p => p.Id == a.ProviderId && p.OwnerUserId == userId),
+            cancellationToken);
 
     private async Task MoveActiveAppointmentAsync(
         Guid userId,
@@ -609,30 +660,10 @@ public sealed class ServiceRequestAppService(
             .Where(b => b.ProviderId == providerId && b.IsActive)
             .ToListAsync(cancellationToken);
 
-        var activeLinks = await db.ProviderServiceBranches.AsNoTracking()
-            .Where(l => l.IsActive)
-            .Join(
-                db.ProviderServices.AsNoTracking().Where(s => s.ProviderId == providerId && s.IsActive),
-                l => l.ProviderServiceId,
-                s => s.Id,
-                (l, s) => new { ServiceId = s.Id, l.ProviderBranchId })
-            .ToListAsync(cancellationToken);
-
-        // Older data may lack service-branch links; treat all active branches as coverage for that service.
+        // Every active point counts. A service linked only to an older point must still
+        // match a job that sits inside another active point. Disabled points are excluded above.
         return activeServices
-            .SelectMany(service =>
-            {
-                var linkedBranchIds = activeLinks
-                    .Where(l => l.ServiceId == service.Id)
-                    .Select(l => l.ProviderBranchId)
-                    .ToHashSet();
-
-                var branches = linkedBranchIds.Count > 0
-                    ? activeBranches.Where(b => linkedBranchIds.Contains(b.Id))
-                    : activeBranches;
-
-                return branches.Select(branch => new CoverageLink(service.CategoryId, branch));
-            })
+            .SelectMany(service => activeBranches.Select(branch => new CoverageLink(service.CategoryId, branch)))
             .ToList();
     }
 
@@ -722,15 +753,9 @@ public sealed class ServiceRequestAppService(
                 continue;
             }
 
-            double? distance = null;
-            if (coverageLinks.Count > 0)
-            {
-                distance = NearestCoverageDistance(coverageLinks, request);
-                if (distance is null)
-                {
-                    continue;
-                }
-            }
+            double? distance = coverageLinks.Count == 0
+                ? null
+                : NearestCoverageDistance(coverageLinks, request);
 
             results.Add(ToSummary(
                 request,

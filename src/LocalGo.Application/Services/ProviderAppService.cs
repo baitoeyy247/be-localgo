@@ -244,6 +244,19 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task DeleteBranchAsync(Guid userId, Guid providerId, Guid branchId, CancellationToken cancellationToken)
+    {
+        var provider = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
+        var branch = provider.Branches.FirstOrDefault(b => b.Id == branchId)
+            ?? throw new AppException("Branch not found.", 404);
+        var links = await db.ProviderServiceBranches
+            .Where(x => x.ProviderBranchId == branchId)
+            .ToListAsync(cancellationToken);
+        db.ProviderServiceBranches.RemoveRange(links);
+        db.ProviderBranches.Remove(branch);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task DeleteServiceAsync(Guid userId, Guid providerId, Guid serviceId, CancellationToken cancellationToken)
     {
         _ = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);

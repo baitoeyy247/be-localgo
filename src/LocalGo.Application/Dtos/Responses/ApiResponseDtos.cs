@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace LocalGo.Application.Dtos.Responses;
 
 public sealed class BidResponseDto
@@ -79,7 +81,10 @@ public sealed class ProviderResponseDto
     public required string ProviderType { get; init; }
     public required string Name { get; init; }
     public string? Description { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ContactLineId { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ContactPhone { get; set; }
     public string? ContactUrl { get; init; }
     public required string Status { get; init; }

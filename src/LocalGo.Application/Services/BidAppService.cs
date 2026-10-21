@@ -103,7 +103,16 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
 
         return await query
             .OrderByDescending(b => b.CreatedAt)
-            .Select(b => new BidDto(b.Id, b.ProviderId, b.Provider.Name, b.PriceText, b.Description, b.AvailableAt, b.Status.ToString()))
+            .Select(b => new BidDto(
+                b.Id,
+                b.ProviderId,
+                b.Provider.Name,
+                b.PriceText,
+                b.Description,
+                b.AvailableAt,
+                b.Status.ToString(),
+                b.Provider.AverageVerifiedRating,
+                b.Provider.VerifiedReviewCount))
             .ToListAsync(cancellationToken);
     }
 
@@ -264,7 +273,10 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
                 b.ServiceRequest.Title,
                 b.PriceText,
                 b.Status.ToString(),
-                b.CreatedAt))
+                b.CreatedAt,
+                b.ServiceRequest.Status.ToString(),
+                b.ServiceRequest.Appointment != null ? b.ServiceRequest.Appointment.Status.ToString() : null,
+                b.ServiceRequest.Appointment != null ? b.ServiceRequest.Appointment.ScheduledAt : null))
             .Take(100)
             .ToListAsync(cancellationToken);
     }

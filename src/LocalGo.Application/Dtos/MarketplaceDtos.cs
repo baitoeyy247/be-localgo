@@ -86,7 +86,10 @@ public sealed record ServiceRequestSummaryDto(
     double? DistanceMeters = null,
     bool AlreadyBidByMe = false,
     bool NeedsAppointmentConfirm = false,
-    bool IsOwnRequest = false);
+    bool IsOwnRequest = false,
+    bool HasReviewed = false,
+    int? MyReviewRating = null,
+    string? AppointmentStatus = null);
 
 public sealed record ProviderBidListItemDto(
     Guid Id,
@@ -94,7 +97,10 @@ public sealed record ProviderBidListItemDto(
     string RequestTitle,
     string PriceText,
     string Status,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    string? RequestStatus = null,
+    string? AppointmentStatus = null,
+    DateTime? AppointmentScheduledAt = null);
 
 public sealed record ReviewCreatedDto(
     Guid Id,
@@ -112,14 +118,17 @@ public sealed record BidDto(
     string PriceText,
     string? Description,
     DateTime? AvailableAt,
-    string Status);
+    string Status,
+    decimal AverageVerifiedRating = 0,
+    int VerifiedReviewCount = 0);
 
 public sealed record ProviderCoverageAreaDto(string Name, int ServiceRadiusMeters);
 
 public sealed record ProviderMatchingInboxDto(
     IReadOnlyList<ServiceRequestSummaryDto> Items,
     bool ExcludesOwnRequests,
-    IReadOnlyList<ProviderCoverageAreaDto> Areas);
+    IReadOnlyList<ProviderCoverageAreaDto> Areas,
+    IReadOnlyList<ServiceRequestSummaryDto>? MyJobs = null);
 
 public sealed record AdminUserDto(
     Guid Id,

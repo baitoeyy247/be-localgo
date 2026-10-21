@@ -32,7 +32,8 @@ public sealed class MarketplaceFlowTests
 
         Assert.False(inbox.ExcludesOwnRequests);
         Assert.Contains(inbox.Areas, area => area.Name == "Main" && area.ServiceRadiusMeters == 8000);
-        var row = Assert.Single(inbox.Items, x => x.Id == seed.Request.Id);
+        Assert.DoesNotContain(inbox.Items, x => x.Id == seed.Request.Id);
+        var row = Assert.Single(inbox.MyJobs!, x => x.Id == seed.Request.Id);
         Assert.True(row.NeedsAppointmentConfirm);
         Assert.Equal(ServiceRequestStatus.Scheduled.ToString(), row.Status);
     }
@@ -53,7 +54,8 @@ public sealed class MarketplaceFlowTests
             includeOwnRequests: true,
             CancellationToken.None);
 
-        var row = Assert.Single(inbox.Items, x => x.Id == seed.Request.Id);
+        Assert.DoesNotContain(inbox.Items, x => x.Id == seed.Request.Id);
+        var row = Assert.Single(inbox.MyJobs!, x => x.Id == seed.Request.Id);
         Assert.True(row.NeedsAppointmentConfirm);
         Assert.Equal(ServiceRequestStatus.ProviderSelected.ToString(), row.Status);
     }
@@ -174,6 +176,9 @@ public sealed class MarketplaceFlowTests
             CancellationToken.None));
         Assert.Equal(403, requesterStart.StatusCode);
 
+        seed.Appointment.ScheduledAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
         var started = await appointments.UpdateStatusAsync(
             seed.ProviderUser.Id,
             seed.Appointment.Id,
@@ -240,6 +245,8 @@ public sealed class MarketplaceFlowTests
             seed.Appointment!.Id,
             AppointmentStatus.Confirmed,
             CancellationToken.None);
+        seed.Appointment.ScheduledAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
 
         await requests.StartAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None);
         var appointment = await db.Appointments.SingleAsync(a => a.Id == seed.Appointment.Id);

@@ -157,6 +157,10 @@ public sealed class AppointmentAppService(
             p => p.OwnerUserId == userId && p.Id == appointment.ProviderId,
             cancellationToken);
         EnsureTransition(appointment.Status, status, isProvider);
+        if (status is AppointmentStatus.InProgress or AppointmentStatus.Completed)
+        {
+            EnsureAppointmentWindow(appointment.ScheduledAt);
+        }
 
         appointment.Status = status;
         appointment.UpdatedAt = DateTime.UtcNow;
@@ -237,6 +241,15 @@ public sealed class AppointmentAppService(
         if (request.Latitude is double lat && request.Longitude is double lng)
         {
             appointment.Location = GeoHelper.CreatePoint(lat, lng);
+        }
+    }
+
+    /// <summary>Work cannot start or finish earlier than one hour before the appointment.</summary>
+    private static void EnsureAppointmentWindow(DateTime? scheduledAt)
+    {
+        if (scheduledAt is null || DateTime.UtcNow < scheduledAt.Value.AddHours(-1))
+        {
+            throw new AppException("ยังไม่ถึงเวลานัด จึงเริ่มหรือปิดงานไม่ได้", 409);
         }
     }
 

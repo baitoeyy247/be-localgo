@@ -29,7 +29,7 @@ public sealed class NotificationRecipientTests
         await sut.SubmitAsync(
             seed.ProviderUser.Id,
             seed.Request.Id,
-            new SubmitBidRequest("500 THB", null, null, null, null),
+            new SubmitBidRequest("500", 500, null, null, null),
             CancellationToken.None);
 
         await notifications.Received(1).EnqueueAsync(

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using LocalGo.Application.Common;
 using LocalGo.Application.Dtos.Responses;
 using LocalGo.Application.Services;
@@ -115,5 +116,69 @@ public sealed class RemainingQaTests
 
         Assert.Equal(ServiceRequestStatus.Open.ToString(), row.Status);
         Assert.Equal(0, row.BidCount);
+    }
+
+    [Fact]
+    public void Public_provider_json_omits_contact_fields_when_they_are_null()
+    {
+        var dto = new ProviderResponseDto
+        {
+            Id = Guid.NewGuid(),
+            ProviderType = "Individual",
+            Name = "Public",
+            Status = "Active",
+        };
+        var json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.DoesNotContain("contactPhone", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("contactLineId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ownerUserId", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Start_before_the_appointment_window_is_rejected()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db, withPendingAppointment: true);
+        seed.Appointment!.Status = AppointmentStatus.Confirmed;
+        seed.Appointment.ScheduledAt = DateTime.UtcNow.AddDays(2);
+        seed.Request.Status = ServiceRequestStatus.Scheduled;
+        await db.SaveChangesAsync();
+
+        var sut = new ServiceRequestAppService(db, TestDbFactory.NoopNotifications(), NullLogger<ServiceRequestAppService>.Instance);
+        var ex = await Assert.ThrowsAsync<AppException>(() =>
+            sut.StartAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None));
+
+        Assert.Equal(409, ex.StatusCode);
+        Assert.Contains("ยังไม่ถึงเวลานัด", ex.Message);
+    }
+
+    [Fact]
+    public void Bid_message_over_2000_characters_is_rejected()
+    {
+        var ex = Assert.Throws<AppException>(() => FieldRules.RequireBidDescription(new string('ก', 2001)));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Contains("2000", ex.Message);
+    }
+
+    [Fact]
+    public async Task Contact_stays_hidden_until_the_appointment_is_confirmed()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db, withPendingAppointment: true);
+        seed.Provider.ContactPhone = "0812345678";
+        seed.Provider.ContactLineId = "line-secret";
+        await db.SaveChangesAsync();
+
+        var sut = new ProviderAppService(db);
+        Assert.False(await sut.ViewerMaySeeContactAsync(null, seed.Provider.Id, CancellationToken.None));
+        Assert.False(await sut.ViewerMaySeeContactAsync(seed.Requester.Id, seed.Provider.Id, CancellationToken.None));
+        Assert.True(await sut.ViewerMaySeeContactAsync(seed.ProviderUser.Id, seed.Provider.Id, CancellationToken.None));
+
+        seed.Appointment!.Status = AppointmentStatus.Confirmed;
+        await db.SaveChangesAsync();
+
+        Assert.True(await sut.ViewerMaySeeContactAsync(seed.Requester.Id, seed.Provider.Id, CancellationToken.None));
     }
 }

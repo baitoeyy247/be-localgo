@@ -1,6 +1,8 @@
 using LocalGo.Application.Abstractions.Notifications;
+using LocalGo.Application.Common;
 using LocalGo.Application.Dtos;
 using LocalGo.Application.Services;
+using LocalGo.Domain.Entities;
 using LocalGo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -256,6 +258,72 @@ public sealed class MatchingNotificationTests
         await db.SaveChangesAsync();
         var disabled = await sut.GetBidFormAsync(seed.MatchingProviderUser.Id, request.Id, CancellationToken.None);
         Assert.Equal("AREA_DISABLED", disabled.ReasonCode);
+    }
+
+    [Fact]
+    public async Task ListMatching_includes_job_that_is_only_inside_the_second_active_point()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedOpenMatchingNotificationAsync(db);
+        var now = DateTime.UtcNow;
+        var oldPoint = await db.ProviderBranches.FirstAsync(b => b.ProviderId == seed.MatchingProvider.Id);
+        oldPoint.Name = "Old point";
+        oldPoint.Latitude = 18.7883;
+        oldPoint.Longitude = 98.9853;
+        oldPoint.Location = GeoHelper.CreatePoint(18.7883, 98.9853);
+        oldPoint.ServiceRadiusMeters = 3000;
+        db.ProviderBranches.Add(new ProviderBranch
+        {
+            Id = Guid.NewGuid(),
+            ProviderId = seed.MatchingProvider.Id,
+            Name = "Second point",
+            Latitude = seed.RequestLatitude,
+            Longitude = seed.RequestLongitude,
+            Location = GeoHelper.CreatePoint(seed.RequestLatitude, seed.RequestLongitude),
+            ServiceRadiusMeters = 2000,
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+
+        var sut = new ServiceRequestAppService(db, TestDbFactory.NoopNotifications(), NullLogger<ServiceRequestAppService>.Instance);
+        var request = await sut.CreateAsync(
+            seed.Requester.Id,
+            new CreateServiceRequestDto(
+                seed.Category.Id,
+                "Near second point",
+                null,
+                "Bangkok",
+                seed.RequestLatitude,
+                seed.RequestLongitude,
+                seed.SearchRadiusMeters,
+                DateTime.UtcNow.AddDays(1),
+                null,
+                "เปิดรับราคา",
+                Publish: true),
+            CancellationToken.None);
+
+        var inbox = await sut.ListMatchingForProviderAsync(
+            seed.MatchingProviderUser.Id,
+            excludeSmokeTestData: false,
+            includeOwnRequests: false,
+            CancellationToken.None);
+        Assert.Contains(inbox.Items, item => item.Id == request.Id);
+        Assert.Contains(inbox.Areas, area => area.Name == "Second point");
+
+        var form = await sut.GetBidFormAsync(seed.MatchingProviderUser.Id, request.Id, CancellationToken.None);
+        Assert.True(form.Allowed);
+
+        oldPoint.IsActive = false;
+        await db.SaveChangesAsync();
+        var afterDisablingOld = await sut.ListMatchingForProviderAsync(
+            seed.MatchingProviderUser.Id,
+            excludeSmokeTestData: false,
+            includeOwnRequests: false,
+            CancellationToken.None);
+        Assert.Contains(afterDisablingOld.Items, item => item.Id == request.Id);
+        Assert.DoesNotContain(afterDisablingOld.Areas, area => area.Name == "Old point");
     }
 
     private static bool PayloadContainsRequestId(object payload, Guid requestId)

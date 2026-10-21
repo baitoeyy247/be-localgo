@@ -1,0 +1,13 @@
+name: Keep SIT API warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping SIT health
+        run: curl -fsS --retry 2 --max-time 60 https://be-localgo-ul36.onrender.com/api/health
