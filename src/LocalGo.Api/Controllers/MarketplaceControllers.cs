@@ -501,22 +501,189 @@ public sealed class AdminController(AdminAppService admin, ILocalGoDbContext db)
         Ok(await admin.ListUsersAsync(cancellationToken));
 
     [HttpGet("providers")]
-    public async Task<IActionResult> Providers(CancellationToken cancellationToken) =>
-        Ok(await db.Providers.AsNoTracking().OrderByDescending(p => p.CreatedAt).Take(100).ToListAsync(cancellationToken));
+    public async Task<IActionResult> Providers(CancellationToken cancellationToken)
+    {
+        var rows = await db.Providers.AsNoTracking()
+            .OrderByDescending(p => p.CreatedAt)
+            .Take(100)
+            .Select(p => new
+            {
+                p.Id,
+                p.ProviderType,
+                p.Name,
+                p.Description,
+                p.ContactUrl,
+                p.Status,
+                p.AverageVerifiedRating,
+                p.AveragePublicRating,
+                p.VerifiedReviewCount,
+                p.PublicReviewCount,
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(rows.Select(p => new ProviderResponseDto
+        {
+            Id = p.Id,
+            ProviderType = p.ProviderType.ToString(),
+            Name = p.Name,
+            Description = p.Description,
+            ContactUrl = p.ContactUrl,
+            Status = p.Status.ToString(),
+            AverageVerifiedRating = p.AverageVerifiedRating,
+            AveragePublicRating = p.AveragePublicRating,
+            VerifiedReviewCount = p.VerifiedReviewCount,
+            PublicReviewCount = p.PublicReviewCount,
+        }));
+    }
 
     [HttpGet("service-requests")]
-    public async Task<IActionResult> ServiceRequests(CancellationToken cancellationToken) =>
-        Ok(await db.ServiceRequests.AsNoTracking().OrderByDescending(r => r.CreatedAt).Take(100).ToListAsync(cancellationToken));
+    public async Task<IActionResult> ServiceRequests(CancellationToken cancellationToken)
+    {
+        var rows = await db.ServiceRequests.AsNoTracking()
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(100)
+            .Select(r => new
+            {
+                r.Id,
+                r.Title,
+                r.Description,
+                r.AddressText,
+                r.CategoryId,
+                CategoryName = r.Category.Name,
+                r.Status,
+                r.Latitude,
+                r.Longitude,
+                r.SearchRadiusMeters,
+                r.PreferredStartAt,
+                r.PreferredEndAt,
+                r.BudgetText,
+                r.SelectedProviderId,
+                r.SelectedBidId,
+                r.Source,
+                r.ProviderServiceId,
+                r.CreatedAt,
+                r.UpdatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(rows.Select(r => new ServiceRequestResponseDto
+        {
+            Id = r.Id,
+            Title = r.Title,
+            Description = r.Description,
+            AddressText = r.AddressText,
+            CategoryId = r.CategoryId,
+            CategoryName = r.CategoryName,
+            Status = r.Status.ToString(),
+            Latitude = r.Latitude,
+            Longitude = r.Longitude,
+            SearchRadiusMeters = r.SearchRadiusMeters,
+            PreferredStartAt = r.PreferredStartAt,
+            PreferredEndAt = r.PreferredEndAt,
+            BudgetText = r.BudgetText,
+            SelectedProviderId = r.SelectedProviderId,
+            SelectedBidId = r.SelectedBidId,
+            Source = r.Source.ToString(),
+            ProviderServiceId = r.ProviderServiceId,
+            CreatedAt = r.CreatedAt,
+            UpdatedAt = r.UpdatedAt,
+        }));
+    }
 
     [HttpGet("bids")]
-    public async Task<IActionResult> BidsList(CancellationToken cancellationToken) =>
-        Ok(await db.Bids.AsNoTracking().OrderByDescending(b => b.CreatedAt).Take(100).ToListAsync(cancellationToken));
+    public async Task<IActionResult> BidsList(CancellationToken cancellationToken)
+    {
+        var rows = await db.Bids.AsNoTracking()
+            .OrderByDescending(b => b.CreatedAt)
+            .Take(100)
+            .Select(b => new
+            {
+                b.Id,
+                b.ServiceRequestId,
+                b.ProviderId,
+                b.Amount,
+                b.Currency,
+                b.PriceText,
+                b.Description,
+                b.AvailableAt,
+                b.Status,
+                b.CreatedAt,
+                b.UpdatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(rows.Select(b => new BidResponseDto
+        {
+            Id = b.Id,
+            ServiceRequestId = b.ServiceRequestId,
+            ProviderId = b.ProviderId,
+            Amount = b.Amount,
+            Currency = b.Currency,
+            PriceText = b.PriceText,
+            Description = b.Description,
+            AvailableAt = b.AvailableAt,
+            Status = b.Status.ToString(),
+            CreatedAt = b.CreatedAt,
+            UpdatedAt = b.UpdatedAt,
+        }));
+    }
 
     [HttpGet("reviews")]
-    public async Task<IActionResult> ReviewsList(CancellationToken cancellationToken) =>
-        Ok(await db.Reviews.AsNoTracking().OrderByDescending(r => r.CreatedAt).Take(100).ToListAsync(cancellationToken));
+    public async Task<IActionResult> ReviewsList(CancellationToken cancellationToken)
+    {
+        var rows = await db.Reviews.AsNoTracking()
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(100)
+            .Select(r => new
+            {
+                r.Id,
+                r.Rating,
+                r.Comment,
+                r.ReviewType,
+                r.CreatedAt,
+                ReviewerDisplayName = r.ReviewerUser.DisplayName,
+                r.ServiceRequestId,
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(rows.Select(r => new ReviewResponseDto
+        {
+            Id = r.Id,
+            Rating = r.Rating,
+            Comment = r.Comment,
+            ReviewType = r.ReviewType.ToString(),
+            CreatedAt = r.CreatedAt,
+            ReviewerDisplayName = r.ReviewerDisplayName,
+            ServiceRequestId = r.ServiceRequestId,
+        }));
+    }
 
     [HttpGet("notifications")]
-    public async Task<IActionResult> Notifications(CancellationToken cancellationToken) =>
-        Ok(await db.NotificationLogs.AsNoTracking().OrderByDescending(n => n.CreatedAt).Take(100).ToListAsync(cancellationToken));
+    public async Task<IActionResult> Notifications(CancellationToken cancellationToken)
+    {
+        var rows = await db.NotificationLogs.AsNoTracking()
+            .OrderByDescending(n => n.CreatedAt)
+            .Take(100)
+            .Select(n => new
+            {
+                n.Id,
+                n.EventType,
+                n.Status,
+                n.CreatedAt,
+                n.SentAt,
+                n.ErrorMessage,
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(rows.Select(n => new
+        {
+            n.Id,
+            n.EventType,
+            type = n.EventType,
+            status = n.Status.ToString(),
+            n.CreatedAt,
+            n.SentAt,
+            n.ErrorMessage,
+        }));
+    }
 }
