@@ -50,6 +50,8 @@ public sealed class ServiceRequestResponseDto
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
     public IEnumerable<ServiceRequestBidSummaryResponseDto>? Bids { get; init; }
+    /// <summary>Viewer's appointment on this request (any terminal state included).</summary>
+    public string? AppointmentStatus { get; set; }
 }
 
 public sealed class ProviderBranchResponseDto

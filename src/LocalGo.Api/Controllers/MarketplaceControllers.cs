@@ -4,6 +4,7 @@ using LocalGo.Application.Abstractions.Auth;
 using LocalGo.Application.Abstractions.Persistence;
 using LocalGo.Application.Dtos;
 using LocalGo.Application.Dtos.Responses;
+using LocalGo.Application.Common;
 using LocalGo.Application.Services;
 using LocalGo.Domain.Enums;
 using LocalGo.Infrastructure.Persistence;
@@ -221,6 +222,7 @@ public sealed class ServiceRequestsController(
     ICurrentUserService currentUser,
     ServiceRequestAppService requests,
     BidAppService bids,
+    AppointmentAppService appointments,
     IMapper mapper) : ControllerBase
 {
     [HttpPost]
@@ -251,7 +253,26 @@ public sealed class ServiceRequestsController(
     {
         var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
         var item = await requests.GetDetailAsync(userId, requestId, currentUser.IsAdmin, cancellationToken);
-        return item is null ? NotFound() : Ok(mapper.Map<ServiceRequestResponseDto>(item));
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var dto = mapper.Map<ServiceRequestResponseDto>(item);
+        try
+        {
+            var appt = await appointments.GetByRequestIdAsync(userId, requestId, cancellationToken);
+            if (appt is not null)
+            {
+                dto.AppointmentStatus = appt.Status.ToString();
+            }
+        }
+        catch (AppException)
+        {
+            // Viewer may lack appointment access; job detail still returns.
+        }
+
+        return Ok(dto);
     }
 
     [HttpPost("{requestId:guid}/cancel")]

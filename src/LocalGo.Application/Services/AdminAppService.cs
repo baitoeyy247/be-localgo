@@ -20,7 +20,12 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             await db.Users.AsNoTracking().CountAsync(cancellationToken),
             await db.Providers.AsNoTracking().CountAsync(cancellationToken),
             await db.ServiceRequests.AsNoTracking()
-                .CountAsync(r => r.Status != ServiceRequestStatus.Draft, cancellationToken),
+                .CountAsync(
+                    r => r.Status != ServiceRequestStatus.Draft
+                        && r.Status != ServiceRequestStatus.Cancelled
+                        && r.Status != ServiceRequestStatus.Completed
+                        && r.Status != ServiceRequestStatus.Expired,
+                    cancellationToken),
             await db.ServiceRequests.AsNoTracking()
                 .CountAsync(r => r.Status == ServiceRequestStatus.Completed, cancellationToken),
             await db.ServiceRequests.AsNoTracking()
