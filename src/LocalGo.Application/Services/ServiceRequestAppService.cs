@@ -291,43 +291,30 @@ public sealed class ServiceRequestAppService(
         var coverageLinks = await LoadCoverageLinksAsync(provider.Id, cancellationToken);
         var open = new List<ServiceRequestSummaryDto>();
         var openIds = new HashSet<Guid>();
-        var mine = new List<ServiceRequestSummaryDto>();
-        var mineIds = new HashSet<Guid>();
-
         if (coverageLinks.Count > 0)
         {
-            await Task.WhenAll(
-                AppendOpenMatchingRequestsAsync(
-                    provider,
-                    userId,
-                    coverageLinks,
-                    excludeSmokeTestData,
-                    includeOwnRequests,
-                    open,
-                    openIds,
-                    cancellationToken),
-                AppendActiveEngagementsAsync(
-                    provider,
-                    userId,
-                    coverageLinks,
-                    excludeSmokeTestData,
-                    includeOwnRequests,
-                    mine,
-                    mineIds,
-                    cancellationToken));
-        }
-        else
-        {
-            await AppendActiveEngagementsAsync(
+            await AppendOpenMatchingRequestsAsync(
                 provider,
                 userId,
                 coverageLinks,
                 excludeSmokeTestData,
                 includeOwnRequests,
-                mine,
-                mineIds,
+                open,
+                openIds,
                 cancellationToken);
         }
+
+        var mine = new List<ServiceRequestSummaryDto>();
+        var mineIds = new HashSet<Guid>();
+        await AppendActiveEngagementsAsync(
+            provider,
+            userId,
+            coverageLinks,
+            excludeSmokeTestData,
+            includeOwnRequests,
+            mine,
+            mineIds,
+            cancellationToken);
 
         var items = open
             .OrderByDescending(r => r.CreatedAt)
