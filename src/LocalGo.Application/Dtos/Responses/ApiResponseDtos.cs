@@ -52,6 +52,8 @@ public sealed class ServiceRequestResponseDto
     public IEnumerable<ServiceRequestBidSummaryResponseDto>? Bids { get; init; }
     /// <summary>Viewer's appointment on this request (any terminal state included).</summary>
     public string? AppointmentStatus { get; set; }
+    /// <summary>Embedded appointment for job detail (avoids a second round-trip).</summary>
+    public AppointmentResponseDto? Appointment { get; set; }
 }
 
 public sealed class ProviderBranchResponseDto

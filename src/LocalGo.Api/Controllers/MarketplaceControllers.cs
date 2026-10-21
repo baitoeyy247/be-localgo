@@ -265,6 +265,7 @@ public sealed class ServiceRequestsController(
             if (appt is not null)
             {
                 dto.AppointmentStatus = appt.Status.ToString();
+                dto.Appointment = mapper.Map<AppointmentResponseDto>(appt);
             }
         }
         catch (AppException)
