@@ -59,10 +59,57 @@ public sealed class AppointmentAppService(
             UpdatedAt = now,
         };
 
-        db.ServiceRequests.Add(serviceRequest);
-        await db.SaveChangesAsync(cancellationToken);
+        var appointment = new Appointment
+        {
+            Id = Guid.NewGuid(),
+            ServiceRequestId = serviceRequest.Id,
+            ProviderId = providerId,
+            RequesterUserId = userId,
+            ScheduledAt = request.ScheduledAt,
+            AddressText = request.AddressText,
+            Note = request.Note,
+            Status = AppointmentStatus.Pending,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
 
-        return await CreateAsync(userId, serviceRequest.Id, request, cancellationToken);
+        TryApplyLocation(appointment, request);
+        MarkRequestScheduled(serviceRequest);
+
+        if (db is not DbContext efContext)
+        {
+            throw new InvalidOperationException("Database context must be EF DbContext for transactions.");
+        }
+
+        db.ServiceRequests.Add(serviceRequest);
+        db.Appointments.Add(appointment);
+
+        var useTransaction = efContext.Database.ProviderName is { } providerName
+            && !providerName.Contains("InMemory", StringComparison.Ordinal);
+
+        if (useTransaction)
+        {
+            await using var transaction = await efContext.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                db.ClearChangeTracker();
+                throw;
+            }
+        }
+        else
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        await NotifyOtherPartyAsync(
+            userId, serviceRequest, appointment, NotificationEvents.AppointmentCreated, cancellationToken);
+        return appointment;
     }
 
     /// <summary>Creates or updates the appointment for a request with a selected provider.</summary>

@@ -120,17 +120,8 @@ if (isDevOrSit)
             ex);
     }
 
-    // Belt-and-suspenders: ensure DeclineReason exists even if a prior build skipped the migration.
-    try
-    {
-        await db.Database.ExecuteSqlRawAsync(
-            """ALTER TABLE appointments ADD COLUMN IF NOT EXISTS "DeclineReason" character varying(2000) NULL;""");
-    }
-    catch (Exception ex)
-    {
-        var migrateLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitMigrate");
-        migrateLogger.LogWarning(ex, "Ensure DeclineReason column skipped");
-    }
+    var migrateLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitMigrate");
+    await AppointmentSchemaBootstrap.EnsureDeclineReasonColumnAsync(db, migrateLogger);
 
     await DataSeeder.SeedAsync(db);
 

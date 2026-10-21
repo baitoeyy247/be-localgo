@@ -114,6 +114,22 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             .ToList();
 
         var staleIds = stale.Select(r => r.Id).ToList();
+
+        // Orphan direct-booking jobs: request saved but appointment insert rolled back / failed.
+        var orphanDirectBookings = await db.ServiceRequests
+            .Where(r => testUserIds.Contains(r.RequesterUserId)
+                && r.Source == ServiceRequestSource.DirectBooking
+                && !db.Appointments.Any(a => a.ServiceRequestId == r.Id))
+            .ToListAsync(cancellationToken);
+        foreach (var orphan in orphanDirectBookings)
+        {
+            if (!staleIds.Contains(orphan.Id))
+            {
+                stale.Add(orphan);
+                staleIds.Add(orphan.Id);
+            }
+        }
+
         if (staleIds.Count > 0)
         {
             db.Appointments.RemoveRange(
