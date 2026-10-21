@@ -180,30 +180,24 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             .Select(r => r.Id)
             .ToListAsync(cancellationToken);
 
-        var appointmentIds = await db.Appointments
-            .Where(a => userIds.Contains(a.RequesterUserId) || providerIds.Contains(a.ProviderId))
-            .Select(a => a.Id)
-            .ToListAsync(cancellationToken);
+        if (db is not DbContext efContext)
+        {
+            throw new InvalidOperationException("Database context must be EF DbContext for transactions.");
+        }
 
-        var bidIds = await db.Bids
-            .Where(b => providerIds.Contains(b.ProviderId) || requestIds.Contains(b.ServiceRequestId))
-            .Select(b => b.Id)
-            .ToListAsync(cancellationToken);
+        var useTransaction = efContext.Database.ProviderName is { } providerName
+            && !providerName.Contains("InMemory", StringComparison.Ordinal);
 
-        db.NotificationLogs.RemoveRange(
-            await db.NotificationLogs.Where(n => n.UserId != null && userIds.Contains(n.UserId.Value))
-                .ToListAsync(cancellationToken));
-        db.Reviews.RemoveRange(
-            await db.Reviews.Where(r => userIds.Contains(r.ReviewerUserId) || providerIds.Contains(r.ProviderId))
-                .ToListAsync(cancellationToken));
-        db.Appointments.RemoveRange(
-            await db.Appointments.Where(a => appointmentIds.Contains(a.Id)).ToListAsync(cancellationToken));
-        db.Bids.RemoveRange(
-            await db.Bids.Where(b => bidIds.Contains(b.Id)).ToListAsync(cancellationToken));
-        db.ServiceRequests.RemoveRange(
-            await db.ServiceRequests.Where(r => requestIds.Contains(r.Id)).ToListAsync(cancellationToken));
-
-        await db.SaveChangesAsync(cancellationToken);
+        if (useTransaction)
+        {
+            await using var transaction = await efContext.Database.BeginTransactionAsync(cancellationToken);
+            await DeletePlaytestMarketplaceRowsAsync(userIds, providerIds, requestIds, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        else
+        {
+            await DeletePlaytestMarketplaceRowsAsync(userIds, providerIds, requestIds, cancellationToken);
+        }
 
         // Keep all persona users + provider profiles; only refresh aggregates from remaining reviews.
         var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
@@ -215,5 +209,41 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             deletedRequests = requestIds.Count,
             providersRecalculated = providersTouched,
         };
+    }
+
+    private async Task DeletePlaytestMarketplaceRowsAsync(
+        HashSet<Guid> userIds,
+        List<Guid> providerIds,
+        List<Guid> requestIds,
+        CancellationToken cancellationToken)
+    {
+        db.NotificationLogs.RemoveRange(
+            await db.NotificationLogs.Where(n => n.UserId != null && userIds.Contains(n.UserId.Value))
+                .ToListAsync(cancellationToken));
+
+        db.Reports.RemoveRange(
+            await db.Reports.Where(r => userIds.Contains(r.ReporterUserId)).ToListAsync(cancellationToken));
+
+        db.Reviews.RemoveRange(
+            await db.Reviews.Where(r =>
+                    userIds.Contains(r.ReviewerUserId)
+                    || providerIds.Contains(r.ProviderId)
+                    || (r.ServiceRequestId != null && requestIds.Contains(r.ServiceRequestId.Value)))
+                .ToListAsync(cancellationToken));
+
+        db.Appointments.RemoveRange(
+            await db.Appointments.Where(a =>
+                    userIds.Contains(a.RequesterUserId) || providerIds.Contains(a.ProviderId))
+                .ToListAsync(cancellationToken));
+
+        db.Bids.RemoveRange(
+            await db.Bids.Where(b =>
+                    providerIds.Contains(b.ProviderId) || requestIds.Contains(b.ServiceRequestId))
+                .ToListAsync(cancellationToken));
+
+        db.ServiceRequests.RemoveRange(
+            await db.ServiceRequests.Where(r => requestIds.Contains(r.Id)).ToListAsync(cancellationToken));
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 }
