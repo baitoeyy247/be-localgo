@@ -92,7 +92,14 @@ if (!string.IsNullOrWhiteSpace(connectionString))
 
 if (!string.IsNullOrWhiteSpace(redisConnection))
 {
-    healthChecks.AddRedis(redisConnection, name: "redis");
+    // M-N4: optional, never Unhealthy (Redis is only used for health reporting).
+    healthChecks.Add(new Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckRegistration(
+        "redis",
+        sp => new LocalGo.Api.Health.OptionalRedisHealthCheck(
+            redisConnection,
+            sp.GetRequiredService<ILogger<LocalGo.Api.Health.OptionalRedisHealthCheck>>()),
+        failureStatus: null,
+        tags: ["optional"]));
 }
 
 var corsOrigins = builder.Configuration["Cors:AllowedOrigins"]?

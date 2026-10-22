@@ -213,8 +213,19 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
             throw new AppException("Cannot update bid after selection.", 409);
         }
 
+        var previousPriceText = bid.PriceText;
+        var previousAmount = bid.Amount;
+        var previousDescription = bid.Description;
+        var previousAvailableAt = bid.AvailableAt;
         ApplyEditableBidFields(bid, request, NormalizeBid(request), DateTime.UtcNow);
+        var changed = previousPriceText != bid.PriceText || previousAmount != bid.Amount
+            || previousDescription != bid.Description || previousAvailableAt != bid.AvailableAt;
         await db.SaveChangesAsync(cancellationToken);
+        if (changed)
+        {
+            await NotifyRequesterAboutBidAsync(NotificationEvents.BidUpdated, userId, provider.Name, bid, cancellationToken);
+        }
+
         return bid;
     }
 
@@ -270,6 +281,59 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        await NotifyRequesterAboutBidAsync(NotificationEvents.BidWithdrawn, userId, provider.Name, bid, cancellationToken);
+    }
+
+    /// <summary>M-N2: notifies the request owner after a bid is updated or withdrawn (post-commit, best-effort).</summary>
+    private async Task NotifyRequesterAboutBidAsync(
+        string eventType, Guid actorUserId, string providerName, Bid bid, CancellationToken cancellationToken)
+    {
+        var ctx = await db.ServiceRequests.AsNoTracking()
+            .Where(r => r.Id == bid.ServiceRequestId)
+            .Select(r => new { r.Id, r.Title, r.CategoryId, r.RequesterUserId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (ctx is null)
+        {
+            return;
+        }
+
+        var requester = await db.Users.AsNoTracking()
+            .Where(u => u.Id == ctx.RequesterUserId)
+            .Select(u => new { u.Id, u.LineUserId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (requester is null)
+        {
+            return;
+        }
+
+        var categoryName = await db.ServiceCategories.AsNoTracking()
+            .Where(c => c.Id == ctx.CategoryId)
+            .Select(c => c.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        await NotificationEnqueue.TryExcludingActorAsync(
+            logger,
+            notifications,
+            eventType,
+            requester.Id,
+            actorUserId,
+            requester.LineUserId,
+            new
+            {
+                requestId = ctx.Id,
+                bidId = bid.Id,
+                title = ctx.Title,
+                categoryId = ctx.CategoryId,
+                categoryName,
+                providerName,
+                priceText = bid.PriceText,
+                amount = bid.Amount,
+            },
+            cancellationToken,
+            "Bid change saved but notification enqueue failed. Event={Event} RequestId={RequestId} BidId={BidId}",
+            eventType,
+            ctx.Id,
+            bid.Id);
     }
 
     public async Task<IReadOnlyList<ProviderBidListItemDto>> ListMineAsync(Guid userId, CancellationToken cancellationToken)

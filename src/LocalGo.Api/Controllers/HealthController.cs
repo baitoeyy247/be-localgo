@@ -52,18 +52,20 @@ public sealed class HealthController(HealthCheckService healthCheckService, IMem
             ? Status(pg.Status)
             : "Unknown";
 
+        // M-N4: Redis is optional/non-critical; it is reported but never degrades overall status.
         var redis = report.Entries.TryGetValue("redis", out var rd)
-            ? Status(rd.Status)
-            : "Unknown";
+            ? (rd.Data.TryGetValue("redis", out var st) ? st?.ToString() ?? "Unknown" : Status(rd.Status))
+            : "NotConfigured";
 
         var apiHealthy = database == "Healthy";
-        var overall = apiHealthy ? (redis == "Healthy" ? "Healthy" : "Degraded") : "Unhealthy";
+        var overall = apiHealthy ? "Healthy" : "Unhealthy";
 
         var result = new
         {
             status = overall,
             database,
             redis,
+            redisCritical = false,
             commit = BuildCommit,
         };
 

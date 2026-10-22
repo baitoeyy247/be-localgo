@@ -160,6 +160,30 @@ public sealed class NotificationPublisherTests
         stdout.Received(1).WriteLine(Arg.Is<string>(l => l.StartsWith("[NOTIFY] ") && l.Contains("ReviewReceived")));
     }
 
+    [Theory]
+    [InlineData(NotificationEvents.BidUpdated, "ปรับราคาข้อเสนอเป็น 1,500 บาท")]
+    [InlineData(NotificationEvents.BidWithdrawn, "ถอนข้อเสนอแล้ว")]
+    [InlineData(NotificationEvents.AccountSuspended, "ถูกระงับ")]
+    [InlineData(NotificationEvents.AccountReactivated, "กลับมาใช้งานได้")]
+    public async Task EnqueueAsync_console_mode_new_events_are_sent_with_message(string eventType, string expected)
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var stdout = Substitute.For<INotifyStdout>();
+        var sut = CreatePublisher(db, new LineSettings(), stdout: stdout, useConsoleSender: true);
+
+        await sut.EnqueueAsync(
+            eventType,
+            Guid.NewGuid(),
+            null,
+            new { requestId = Guid.NewGuid(), bidId = Guid.NewGuid(), providerName = "ช่างเอ", priceText = "1500 บาท", amount = 1500m, status = "Suspended" },
+            CancellationToken.None);
+
+        var log = db.NotificationLogs.Single();
+        Assert.Equal(NotificationStatus.Sent, log.Status);
+        stdout.Received(1).WriteLine(Arg.Is<string>(l => l.StartsWith("[NOTIFY] ") && l.Contains(eventType)
+            && JsonDocument.Parse(l.Substring(9)).RootElement.GetProperty("message").GetString()!.Contains(expected)));
+    }
+
     [Fact]
     public async Task Sender_exception_marks_failed_with_error_then_retry_sends()
     {

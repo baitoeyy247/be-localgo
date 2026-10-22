@@ -74,6 +74,28 @@ public static class NotificationMessageBuilder
                     : JoinLines(serviceBlock, $"{GetStr(payload, "reviewType")} · {GetStr(payload, "rating")} ดาว"),
                 "/provider/profile"),
 
+            NotificationEvents.BidUpdated => (
+                "ข้อเสนอมีการเปลี่ยนแปลง",
+                JoinLines(
+                    serviceBlock,
+                    $"{GetStr(payload, "providerName")} ปรับราคาข้อเสนอเป็น {FormatBidPrice(payload)} บาท"),
+                $"/requester/bids?requestId={GetStr(payload, "requestId")}"),
+
+            NotificationEvents.BidWithdrawn => (
+                "ผู้ให้บริการถอนข้อเสนอ",
+                JoinLines(serviceBlock, $"{GetStr(payload, "providerName")} ถอนข้อเสนอแล้ว"),
+                $"/requester/bids?requestId={GetStr(payload, "requestId")}"),
+
+            NotificationEvents.AccountSuspended => (
+                "บัญชีของคุณถูกระงับ",
+                "บัญชี LocalGo ของคุณถูกระงับการใช้งานชั่วคราว หากมีข้อสงสัยโปรดติดต่อผู้ดูแลระบบ",
+                null),
+
+            NotificationEvents.AccountReactivated => (
+                "บัญชีของคุณเปิดใช้งานแล้ว",
+                "บัญชี LocalGo ของคุณกลับมาใช้งานได้ตามปกติแล้ว",
+                null),
+
             _ => ("LocalGo แจ้งเตือน", eventType, null),
         };
 
@@ -218,6 +240,17 @@ public static class NotificationMessageBuilder
         "Rejected" => "ผู้ให้บริการปฏิเสธ",
         _ => status,
     };
+
+    private static string FormatBidPrice(JsonElement? payload)
+    {
+        var amount = GetStr(payload, "amount");
+        if (decimal.TryParse(amount, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var d))
+        {
+            return d.ToString("#,0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return GetStr(payload, "priceText").Replace("บาท", string.Empty).Trim();
+    }
 
     private static string GetStr(JsonElement? el, string key) =>
         el?.TryGetProperty(key, out var v) == true

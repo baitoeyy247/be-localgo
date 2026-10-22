@@ -12,4 +12,8 @@ public static class NotificationEvents
     public const string RequestExpired = "RequestExpired";
     public const string RequestCancelled = "RequestCancelled";
     public const string ReviewReceived = "ReviewReceived";
+    public const string BidUpdated = "BidUpdated";
+    public const string BidWithdrawn = "BidWithdrawn";
+    public const string AccountSuspended = "AccountSuspended";
+    public const string AccountReactivated = "AccountReactivated";
 }

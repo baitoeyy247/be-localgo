@@ -1,12 +1,19 @@
+using LocalGo.Application.Abstractions.Notifications;
 using LocalGo.Application.Abstractions.Persistence;
 using LocalGo.Application.Common;
 using LocalGo.Application.Dtos;
 using LocalGo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LocalGo.Application.Services;
 
-public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService reviews)
+public sealed class AdminAppService(
+    ILocalGoDbContext db,
+    ReviewAppService reviews,
+    INotificationPublisher? notifications = null,
+    ILogger<AdminAppService>? logger = null)
 {
     public const string TestUserLinePrefix = "dev-persona-";
 
@@ -97,9 +104,32 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
             ?? throw new AppException("ไม่พบผู้ใช้", 404);
 
+        var previous = user.Status;
         user.Status = parsed;
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+
+        // M-N2: notify account owner only on a real transition (repeat clicks don't duplicate).
+        var eventType = (previous, parsed) switch
+        {
+            (not UserStatus.Suspended, UserStatus.Suspended) => NotificationEvents.AccountSuspended,
+            (UserStatus.Suspended, UserStatus.Active) => NotificationEvents.AccountReactivated,
+            _ => null,
+        };
+        if (eventType is not null && notifications is not null)
+        {
+            await NotificationEnqueue.TryAsync(
+                logger ?? (ILogger)NullLogger.Instance,
+                notifications,
+                eventType,
+                user.Id,
+                user.LineUserId,
+                new { userId = user.Id, status = parsed.ToString() },
+                cancellationToken,
+                "User status changed but notification enqueue failed. Event={Event} UserId={UserId}",
+                eventType,
+                user.Id);
+        }
     }
 
     /// <summary>
