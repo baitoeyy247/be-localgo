@@ -35,6 +35,7 @@ public sealed class ServiceRequestAppService(
     /// <summary>Creates a draft or published marketplace service request.</summary>
     public async Task<ServiceRequest> CreateAsync(Guid userId, CreateServiceRequestDto request, CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.AddressText, 500, "ที่อยู่");
         var budgetText = BudgetRules.NormalizeBudgetText(request.BudgetText, request.BudgetType);
         FieldRules.RequireBudget(budgetText);
         FieldRules.RequireRequestText(request.Title, request.Description);

@@ -127,6 +127,8 @@ public sealed class AppointmentAppService(
         CreateAppointmentRequest request,
         CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.AddressText, 500, "สถานที่");
+        FieldRules.MaxLength(request.Note, 2000, "หมายเหตุ");
         var serviceRequest = await db.ServiceRequests.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
 

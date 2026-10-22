@@ -140,6 +140,97 @@ public sealed class NotificationPublisherTests
         Assert.Equal(isConsole, settings.IsConsole);
     }
 
+    [Fact]
+    public async Task EnqueueAsync_console_mode_review_received_with_numeric_rating_is_sent()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var stdout = Substitute.For<INotifyStdout>();
+        var sut = CreatePublisher(db, new LineSettings(), stdout: stdout, useConsoleSender: true);
+
+        await sut.EnqueueAsync(
+            NotificationEvents.ReviewReceived,
+            Guid.NewGuid(),
+            null,
+            new { providerId = Guid.NewGuid(), rating = 5, reviewType = "RequesterToProvider", serviceRequestId = Guid.NewGuid() },
+            CancellationToken.None);
+
+        var log = db.NotificationLogs.Single();
+        Assert.Equal(NotificationStatus.Sent, log.Status);
+        Assert.Equal(1, log.RetryCount);
+        stdout.Received(1).WriteLine(Arg.Is<string>(l => l.StartsWith("[NOTIFY] ") && l.Contains("ReviewReceived")));
+    }
+
+    [Fact]
+    public async Task Sender_exception_marks_failed_with_error_then_retry_sends()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var sender = Substitute.For<INotificationSender>();
+        var calls = 0;
+        sender.SendAsync(Arg.Any<NotificationSendRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => ++calls == 1
+                ? throw new InvalidOperationException("boom")
+                : Task.FromResult(new NotificationSendResult(NotificationSendOutcome.Sent)));
+        var sut = new NotificationPublisher(db, sender, NullLogger<NotificationPublisher>.Instance);
+
+        await sut.EnqueueAsync(NotificationEvents.NewBidReceived, Guid.NewGuid(), null, new { requestId = Guid.NewGuid() });
+
+        var log = db.NotificationLogs.Single();
+        Assert.Equal(NotificationStatus.Failed, log.Status);
+        Assert.Equal(1, log.RetryCount);
+        Assert.Contains("boom", log.ErrorMessage);
+
+        log.CreatedAt = DateTime.UtcNow.AddMinutes(-1); // past backoff window
+        await db.SaveChangesAsync();
+        await sut.RetryPendingAsync();
+
+        Assert.Equal(NotificationStatus.Sent, log.Status);
+        Assert.Equal(2, log.RetryCount);
+        Assert.Null(log.ErrorMessage);
+        Assert.NotNull(log.SentAt);
+    }
+
+    [Fact]
+    public async Task RetryPendingAsync_picks_up_stale_pending_rows()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var sender = Substitute.For<INotificationSender>();
+        sender.SendAsync(Arg.Any<NotificationSendRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new NotificationSendResult(NotificationSendOutcome.Sent));
+        db.NotificationLogs.Add(new NotificationLog
+        {
+            Id = Guid.NewGuid(),
+            EventType = NotificationEvents.ReviewReceived,
+            Status = NotificationStatus.Pending,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-5),
+            PayloadJson = "{}",
+        });
+        db.NotificationLogs.Add(new NotificationLog
+        {
+            Id = Guid.NewGuid(),
+            EventType = NotificationEvents.NewBidReceived,
+            Status = NotificationStatus.Pending,
+            CreatedAt = DateTime.UtcNow,
+            PayloadJson = "{}",
+        });
+        await db.SaveChangesAsync();
+        var sut = new NotificationPublisher(db, sender, NullLogger<NotificationPublisher>.Instance);
+
+        await sut.RetryPendingAsync();
+
+        Assert.Equal(1, db.NotificationLogs.Count(n => n.Status == NotificationStatus.Sent));
+        Assert.Equal(1, db.NotificationLogs.Count(n => n.Status == NotificationStatus.Pending));
+    }
+
+    [Fact]
+    public void Backoff_grows_exponentially()
+    {
+        var created = DateTime.UtcNow;
+        var log = new NotificationLog { Id = Guid.NewGuid(), EventType = "x", CreatedAt = created, RetryCount = 1 };
+        Assert.Equal(created.AddSeconds(15), NotificationPublisher.NextAttemptAt(log));
+        log.RetryCount = 3;
+        Assert.Equal(created.AddSeconds(105), NotificationPublisher.NextAttemptAt(log));
+    }
+
     private static NotificationPublisher CreatePublisher(
         LocalGo.Infrastructure.Persistence.LocalGoDbContext db,
         LineSettings lineSettings,

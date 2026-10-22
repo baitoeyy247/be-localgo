@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace LocalGo.Infrastructure.Jobs;
 
 /// <summary>
-/// Background service that retries Failed notification logs with RetryCount &lt; 3.
+/// Background service that retries Failed and stale Pending notification logs every 30s with backoff.
 /// Runs every 5 minutes with exponential back-off built into retry count.
 /// </summary>
 public sealed class NotificationRetryHostedService(
@@ -16,7 +16,7 @@ public sealed class NotificationRetryHostedService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Initial delay so startup doesn't overlap with first-request notifications
-        await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+        await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -31,7 +31,7 @@ public sealed class NotificationRetryHostedService(
                 logger.LogError(ex, "Notification retry job failed");
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }
     }
 }

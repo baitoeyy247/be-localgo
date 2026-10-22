@@ -12,6 +12,10 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
 {
     public async Task<Provider> CreateAsync(Guid userId, CreateProviderRequest request, CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.Name, 120, "ชื่อที่แสดง");
+        FieldRules.MaxLength(request.Description, 2000, "รายละเอียด");
+        FieldRules.MaxLength(request.ContactLineId, 64, "LINE ID");
+        FieldRules.MaxLength(request.ContactUrl, 500, "ลิงก์ติดต่อ");
         if (await db.Providers.AnyAsync(p => p.OwnerUserId == userId, cancellationToken))
         {
             throw new AppException("Provider profile already exists.", 409);
@@ -60,6 +64,10 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
 
     public async Task<Provider> UpdateAsync(Guid userId, Guid providerId, UpdateProviderRequest request, CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.Name, 120, "ชื่อที่แสดง");
+        FieldRules.MaxLength(request.Description, 2000, "รายละเอียด");
+        FieldRules.MaxLength(request.ContactLineId, 64, "LINE ID");
+        FieldRules.MaxLength(request.ContactUrl, 500, "ลิงก์ติดต่อ");
         var provider = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
         if (request.Name is not null) provider.Name = request.Name.Trim();
         if (request.Description is not null) provider.Description = request.Description;
@@ -90,6 +98,8 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
 
     public async Task<ProviderBranch> AddBranchAsync(Guid userId, Guid providerId, BranchRequest request, CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.Name, 120, "ชื่อพื้นที่");
+        FieldRules.MaxLength(request.AddressText, 500, "ที่อยู่");
         _ = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
         var now = DateTime.UtcNow;
         var branch = new ProviderBranch
@@ -114,6 +124,8 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
     public async Task<ProviderBranch> UpdateBranchAsync(
         Guid userId, Guid providerId, Guid branchId, BranchRequest request, CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.Name, 120, "ชื่อพื้นที่");
+        FieldRules.MaxLength(request.AddressText, 500, "ที่อยู่");
         _ = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
         var branch = await db.ProviderBranches.FirstOrDefaultAsync(b => b.Id == branchId && b.ProviderId == providerId, cancellationToken)
             ?? throw new AppException("Branch not found.", 404);
@@ -133,6 +145,8 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
     public async Task<ProviderService> AddServiceAsync(
         Guid userId, Guid providerId, CreateServiceRequest request, CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.Description, 2000, "รายละเอียดบริการ");
+        FieldRules.MaxLength(request.BasePriceText, 100, "ราคา");
         var provider = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
         FieldRules.RequireServiceTitle(request.Title);
         FieldRules.RequirePrice(request.BasePriceText);
@@ -196,6 +210,8 @@ public sealed class ProviderAppService(ILocalGoDbContext db)
     public async Task<ProviderService> UpdateServiceAsync(
         Guid userId, Guid providerId, Guid serviceId, UpdateServiceRequest request, CancellationToken cancellationToken)
     {
+        FieldRules.MaxLength(request.Description, 2000, "รายละเอียดบริการ");
+        FieldRules.MaxLength(request.BasePriceText, 100, "ราคา");
         _ = await RequireOwnedProviderAsync(userId, providerId, cancellationToken);
         var service = await db.ProviderServices.FirstOrDefaultAsync(
             s => s.Id == serviceId && s.ProviderId == providerId, cancellationToken)

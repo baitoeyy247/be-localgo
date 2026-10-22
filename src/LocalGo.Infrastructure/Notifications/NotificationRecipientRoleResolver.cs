@@ -63,5 +63,5 @@ internal static class NotificationRecipientRoleResolver
     }
 
     private static string GetStr(JsonElement? el, string key) =>
-        el?.TryGetProperty(key, out var v) == true ? v.GetString() ?? "" : "";
+        el?.TryGetProperty(key, out var v) == true ? (v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : v.ValueKind is System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined ? "" : v.GetRawText()) : "";
 }

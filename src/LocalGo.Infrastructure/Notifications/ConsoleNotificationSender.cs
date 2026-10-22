@@ -82,7 +82,7 @@ public sealed class ConsoleNotificationSender(
 
     private static Guid? ParseGuidOrNull(JsonElement? payload, string key)
     {
-        var s = payload?.TryGetProperty(key, out var v) == true ? v.GetString() : null;
+        var s = payload?.TryGetProperty(key, out var v) == true ? (v.ValueKind == JsonValueKind.String ? v.GetString() : v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined ? null : v.GetRawText()) : null;
         return Guid.TryParse(s, out var id) ? id : null;
     }
 

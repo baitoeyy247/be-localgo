@@ -220,7 +220,14 @@ public static class NotificationMessageBuilder
     };
 
     private static string GetStr(JsonElement? el, string key) =>
-        el?.TryGetProperty(key, out var v) == true ? v.GetString() ?? "" : "";
+        el?.TryGetProperty(key, out var v) == true
+            ? v.ValueKind switch
+            {
+                JsonValueKind.String => v.GetString() ?? "",
+                JsonValueKind.Null or JsonValueKind.Undefined => "",
+                _ => v.GetRawText(),
+            }
+            : "";
 
     private static string JoinLines(params string?[] lines) =>
         string.Join('\n', lines.Where(l => !string.IsNullOrWhiteSpace(l)));

@@ -11,6 +11,14 @@ public static class FieldRules
     public const int BudgetMin = 1;
     public const int BudgetMax = 1_000_000;
 
+    public static void MaxLength(string? value, int max, string label)
+    {
+        if (value is not null && value.Trim().Length > max)
+        {
+            throw new AppException($"{label}ต้องไม่เกิน {max} ตัวอักษร", 400);
+        }
+    }
+
     public static void RequireThaiMobile(string? phone)
     {
         if (string.IsNullOrWhiteSpace(phone))

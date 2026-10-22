@@ -842,6 +842,7 @@ public sealed class AdminController(
                 n.CreatedAt,
                 n.SentAt,
                 n.ErrorMessage,
+                n.RetryCount,
             })
             .ToListAsync(cancellationToken);
 
@@ -854,6 +855,7 @@ public sealed class AdminController(
             n.CreatedAt,
             n.SentAt,
             n.ErrorMessage,
+            attemptCount = n.RetryCount,
         }));
     }
 }
