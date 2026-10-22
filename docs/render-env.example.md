@@ -13,8 +13,11 @@ Line__ChannelId=2010177240
 Line__ChannelSecret=<from LINE Console>
 Line__LiffId=2010177240-Bu98ZCLT
 Line__MessagingAccessToken=<from LINE Console>
+NOTIFY_MODE=line
 Cors__AllowedOrigins=https://localgo-sit.pages.dev
 ```
+
+`NOTIFY_MODE`: `line` (default, LINE push) or `console` (structured `[NOTIFY]` JSON on stdout, no LINE API — useful for SIT log inspection).
 
 Neon: run `scripts/sit-neon-init.sql` once (`CREATE EXTENSION postgis`).
 
