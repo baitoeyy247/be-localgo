@@ -39,11 +39,18 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
 
+        var providerOwnerIds = await db.Providers.AsNoTracking()
+            .Select(p => p.OwnerUserId)
+            .ToListAsync(cancellationToken);
+        var providerOwners = providerOwnerIds.ToHashSet();
+
         var query = db.Users.AsNoTracking().OrderByDescending(u => u.CreatedAt);
         var total = await query.CountAsync(cancellationToken);
-        var rows = await query
+        var users = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .ToListAsync(cancellationToken);
+        var rows = users
             .Select(u => new AdminUserDto(
                 u.Id,
                 u.DisplayName,
@@ -52,8 +59,8 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
                 u.Status.ToString(),
                 u.LineUserId.StartsWith(TestUserLinePrefix),
                 u.ActiveRole.HasValue ? u.ActiveRole.Value.ToString() : null,
-                db.Providers.Any(p => p.OwnerUserId == u.Id)))
-            .ToListAsync(cancellationToken);
+                providerOwners.Contains(u.Id)))
+            .ToList();
 
         return new AdminUsersPageDto(rows.DistinctBy(u => u.Id).ToList(), total, page, pageSize);
     }

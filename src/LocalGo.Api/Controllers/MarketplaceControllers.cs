@@ -703,6 +703,7 @@ public sealed class AdminController(
         }
 
         var rows = await query
+            .Include(r => r.Appointment)
             .OrderByDescending(r => r.CreatedAt)
             .Take(100)
             .Select(r => new
@@ -714,6 +715,7 @@ public sealed class AdminController(
                 r.CategoryId,
                 CategoryName = r.Category.Name,
                 r.Status,
+                AppointmentStatus = r.Appointment != null ? r.Appointment.Status : (AppointmentStatus?)null,
                 r.Latitude,
                 r.Longitude,
                 r.SearchRadiusMeters,
@@ -750,6 +752,7 @@ public sealed class AdminController(
             ProviderServiceId = r.ProviderServiceId,
             CreatedAt = r.CreatedAt,
             UpdatedAt = r.UpdatedAt,
+            AppointmentStatus = r.AppointmentStatus?.ToString(),
         }));
     }
 
