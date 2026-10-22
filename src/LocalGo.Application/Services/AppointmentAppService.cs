@@ -260,7 +260,7 @@ public sealed class AppointmentAppService(
         appointment.UpdatedAt = DateTime.UtcNow;
         await ApplyRequestStatusForAppointmentAsync(appointment, status, cancellationToken);
         ProgressHelper.Touch(appointment.ServiceRequest);
-        await db.SaveChangesAsync(cancellationToken);
+        await SaveStatusChangeAsync(appointmentId, status);
         try
         {
             await NotifyOtherPartyAsync(
@@ -276,6 +276,39 @@ public sealed class AppointmentAppService(
         }
 
         return appointment;
+    }
+
+    /// <summary>
+    /// R38 TX-1: a status change must not be rolled back because the HTTP client went away mid-commit
+    /// (RequestAborted cancelled the in-flight UPDATE → "An error occurred using a transaction").
+    /// Commit with CancellationToken.None, retry once on a DB failure, then surface a Thai 503.
+    /// </summary>
+    private async Task SaveStatusChangeAsync(Guid appointmentId, AppointmentStatus status)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await db.SaveChangesAsync(CancellationToken.None);
+                return;
+            }
+            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or TimeoutException
+                                       || ex.GetType().Name is "NpgsqlException" or "PostgresException")
+            {
+                if (ex is DbUpdateConcurrencyException || attempt >= 2)
+                {
+                    logger.LogError(ex,
+                        "Appointment {AppointmentId} status change to {Status} failed to save (attempt {Attempt})",
+                        appointmentId, status, attempt);
+                    throw new AppException("บันทึกสถานะนัดหมายไม่สำเร็จ ระบบขัดข้องชั่วคราว กรุณาลองใหม่", 503);
+                }
+
+                logger.LogWarning(ex,
+                    "Appointment {AppointmentId} status change to {Status} save failed; retrying once",
+                    appointmentId, status);
+                await Task.Delay(300, CancellationToken.None);
+            }
+        }
     }
 
     private async Task<Appointment> UpsertExistingAppointmentAsync(
