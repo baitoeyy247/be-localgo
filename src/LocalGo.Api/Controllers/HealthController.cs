@@ -27,6 +27,10 @@ public sealed class HealthController(HealthCheckService healthCheckService) : Co
             ?.Split('+')[0]
             ?? "unknown";
     }
+    /// <summary>Fast liveness for FE warm-up — no DB/redis checks.</summary>
+    [HttpGet("lite")]
+    public IActionResult GetLite() => Ok(new { status = "Healthy", commit = BuildCommit });
+
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {

@@ -272,6 +272,8 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
         var keptUsers = await db.Users.AsNoTracking()
             .CountAsync(u => u.LineUserId.StartsWith(TestUserLinePrefix), cancellationToken);
 
+        var dashboard = await GetDashboardAsync(cancellationToken);
+
         return new
         {
             deletedUsers = deletedAutomatedUsers,
@@ -281,6 +283,7 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             deletedAutomatedRequests = automatedRequestIds.Count,
             sampleReviewsSeeded,
             providersRecalculated = providersTouched,
+            dashboard,
         };
     }
 
