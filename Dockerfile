@@ -11,6 +11,8 @@ COPY src/LocalGo.Infrastructure/LocalGo.Infrastructure.csproj src/LocalGo.Infras
 RUN dotnet restore src/LocalGo.Api/LocalGo.Api.csproj
 
 COPY src/ src/
+ARG RENDER_GIT_COMMIT=unknown
+ARG GIT_COMMIT=unknown
 RUN dotnet publish src/LocalGo.Api/LocalGo.Api.csproj \
     -c Release \
     -o /app/publish \
@@ -19,6 +21,9 @@ RUN dotnet publish src/LocalGo.Api/LocalGo.Api.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
+ARG RENDER_GIT_COMMIT=unknown
+ARG GIT_COMMIT=unknown
+ENV LOCALGO_COMMIT_SHA=${RENDER_GIT_COMMIT}
 ENV ASPNETCORE_ENVIRONMENT=Staging
 ENV ASPNETCORE_URLS=http://+:8080
 

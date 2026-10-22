@@ -33,6 +33,7 @@ public sealed class FieldRulesTests
 
     [Theory]
     [InlineData("เปิดรับราคา")]
+    [InlineData("เปิดรับข้อเสนอ")]
     [InlineData("1")]
     [InlineData("1000000")]
     public void Budget_accepts_open_or_in_range_integer(string budget)

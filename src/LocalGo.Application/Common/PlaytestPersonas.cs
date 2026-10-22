@@ -1,3 +1,5 @@
+using LocalGo.Domain.Enums;
+
 namespace LocalGo.Application.Common;
 
 /// <summary>Canonical SIT playtest persona labels (entry list, user display name, provider name).</summary>
@@ -26,4 +28,22 @@ public static class PlaytestPersonas
 
     public static bool UsesProviderProfileName(string personaKey) =>
         personaKey is "prov-01" or "prov-02" or "prov-03" or "both-02";
+
+    public static bool IsDualPersonaLineId(string lineUserId) =>
+        lineUserId.Contains("both-", StringComparison.Ordinal);
+
+    public static bool CanActAsRequester(string lineUserId, bool hasProviderProfile, AppRole? activeRole)
+    {
+        if (IsDualPersonaLineId(lineUserId))
+        {
+            return true;
+        }
+
+        if (!hasProviderProfile)
+        {
+            return true;
+        }
+
+        return activeRole is null or AppRole.Requester;
+    }
 }

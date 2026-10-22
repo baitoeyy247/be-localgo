@@ -53,7 +53,8 @@ public sealed record CreateServiceRequestDto(
     DateTime? PreferredStartAt,
     DateTime? PreferredEndAt,
     string? BudgetText,
-    bool Publish);
+    bool Publish,
+    string? BudgetType = null);
 
 public sealed record SelectBidRequest(Guid BidId);
 public sealed record SelectProviderRequest(Guid ProviderId);
@@ -139,7 +140,8 @@ public sealed record AdminUserDto(
     string Status = "Active",
     bool IsTestUser = false,
     string? ActiveRole = null,
-    bool HasProviderProfile = false);
+    bool HasProviderProfile = false,
+    bool CanActAsRequester = true);
 
 public sealed record AdminUsersPageDto(
     IReadOnlyList<AdminUserDto> Items,

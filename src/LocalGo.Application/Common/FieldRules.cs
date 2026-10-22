@@ -5,7 +5,9 @@ namespace LocalGo.Application.Common;
 
 public static class FieldRules
 {
-    public const string OpenBudget = "เปิดรับราคา";
+    public const string OpenBudgetLegacy = "เปิดรับราคา";
+    public const string OpenBudgetCanonical = "เปิดรับข้อเสนอ";
+    public const string OpenBudget = OpenBudgetCanonical;
     public const int BudgetMin = 1;
     public const int BudgetMax = 1_000_000;
 
@@ -23,15 +25,26 @@ public static class FieldRules
         }
     }
 
+    public static bool IsOpenBudget(string? budgetText)
+    {
+        if (string.IsNullOrWhiteSpace(budgetText))
+        {
+            return false;
+        }
+
+        var text = budgetText.Trim();
+        return text is OpenBudgetCanonical or OpenBudgetLegacy;
+    }
+
     public static void RequireBudget(string? budgetText)
     {
         if (string.IsNullOrWhiteSpace(budgetText))
         {
-            throw new AppException("กรุณาระบุงบประมาณหรือเลือกเปิดรับราคา", 400);
+            throw new AppException("กรุณาระบุงบประมาณหรือเลือกเปิดรับข้อเสนอ", 400);
         }
 
         var text = budgetText.Trim();
-        if (text == OpenBudget)
+        if (IsOpenBudget(text))
         {
             return;
         }
@@ -40,7 +53,9 @@ public static class FieldRules
             || amount < BudgetMin
             || amount > BudgetMax)
         {
-            throw new AppException("งบประมาณต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 1000000 หรือเปิดรับราคา", 400);
+            throw new AppException(
+                "งบประมาณต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 1000000 หรือเปิดรับข้อเสนอ",
+                400);
         }
     }
 

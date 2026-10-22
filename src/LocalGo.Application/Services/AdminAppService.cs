@@ -51,15 +51,21 @@ public sealed class AdminAppService(ILocalGoDbContext db, ReviewAppService revie
             .Take(pageSize)
             .ToListAsync(cancellationToken);
         var rows = users
-            .Select(u => new AdminUserDto(
-                u.Id,
-                u.DisplayName,
-                u.LineUserId,
-                u.SystemRole.ToString(),
-                u.Status.ToString(),
-                u.LineUserId.StartsWith(TestUserLinePrefix),
-                u.ActiveRole.HasValue ? u.ActiveRole.Value.ToString() : null,
-                providerOwners.Contains(u.Id)))
+            .Select(u =>
+            {
+                var hasProvider = providerOwners.Contains(u.Id);
+                var canRequester = PlaytestPersonas.CanActAsRequester(u.LineUserId, hasProvider, u.ActiveRole);
+                return new AdminUserDto(
+                    u.Id,
+                    u.DisplayName,
+                    u.LineUserId,
+                    u.SystemRole.ToString(),
+                    u.Status.ToString(),
+                    u.LineUserId.StartsWith(TestUserLinePrefix),
+                    u.ActiveRole.HasValue ? u.ActiveRole.Value.ToString() : null,
+                    hasProvider,
+                    canRequester);
+            })
             .ToList();
 
         return new AdminUsersPageDto(rows.DistinctBy(u => u.Id).ToList(), total, page, pageSize);

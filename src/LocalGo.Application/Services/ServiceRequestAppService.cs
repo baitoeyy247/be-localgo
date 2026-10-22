@@ -35,7 +35,8 @@ public sealed class ServiceRequestAppService(
     /// <summary>Creates a draft or published marketplace service request.</summary>
     public async Task<ServiceRequest> CreateAsync(Guid userId, CreateServiceRequestDto request, CancellationToken cancellationToken)
     {
-        FieldRules.RequireBudget(request.BudgetText);
+        var budgetText = BudgetRules.NormalizeBudgetText(request.BudgetText, request.BudgetType);
+        FieldRules.RequireBudget(budgetText);
         FieldRules.RequireRequestText(request.Title, request.Description);
         var now = DateTime.UtcNow;
         var preferred = FieldRules.RequirePreferredTime(request.PreferredStartAt, request.PreferredEndAt, now);
@@ -53,7 +54,7 @@ public sealed class ServiceRequestAppService(
             SearchRadiusMeters = request.SearchRadiusMeters,
             PreferredStartAt = preferred.Start,
             PreferredEndAt = preferred.End,
-            BudgetText = request.BudgetText,
+            BudgetText = budgetText,
             Status = request.Publish ? ServiceRequestStatus.Open : ServiceRequestStatus.Draft,
             LastProgressAt = now,
             CreatedAt = now,
