@@ -124,6 +124,8 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// L-T2-2: outermost so the logged status is the final one (after exception mapping).
+app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 var isDevOrSit = app.Environment.IsDevelopment() || app.Environment.IsStaging();
