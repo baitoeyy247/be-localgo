@@ -177,36 +177,47 @@ public sealed class ServiceRequestAppService(
     public async Task<ServiceRequest?> GetDetailAsync(
         Guid viewerUserId, Guid requestId, bool isAdmin, CancellationToken cancellationToken)
     {
-        var request = await db.ServiceRequests
-            .AsNoTracking()
-            .Include(r => r.Bids).ThenInclude(b => b.Provider)
-            .Include(r => r.Category)
-            .FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken);
+        if (isAdmin)
+        {
+            return await LoadRequestDetailAsync(requestId, providerBidFilter: null, cancellationToken);
+        }
 
-        if (request is null)
+        var header = await db.ServiceRequests.AsNoTracking()
+            .Where(r => r.Id == requestId)
+            .Select(r => new
+            {
+                r.Id,
+                r.RequesterUserId,
+                r.Status,
+                r.SelectedProviderId,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (header is null)
         {
             return null;
         }
 
-        if (!isAdmin && request.RequesterUserId != viewerUserId)
+        if (header.RequesterUserId == viewerUserId)
         {
-            var provider = await db.Providers.AsNoTracking()
-                .FirstOrDefaultAsync(p => p.OwnerUserId == viewerUserId, cancellationToken);
-            if (provider is null)
-            {
-                return null;
-            }
-
-            if (!CanProviderViewDetail(request, provider.Id)
-                && !await HasActiveAppointmentForProviderAsync(request.Id, provider.Id, cancellationToken))
-            {
-                return null;
-            }
-
-            request.Bids = request.Bids.Where(b => b.ProviderId == provider.Id).ToList();
+            return await LoadRequestDetailAsync(requestId, providerBidFilter: null, cancellationToken);
         }
 
-        return request;
+        var provider = await db.Providers.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.OwnerUserId == viewerUserId, cancellationToken);
+        if (provider is null)
+        {
+            return null;
+        }
+
+        var hasBid = await ProviderHasBidOnRequestAsync(requestId, provider.Id, cancellationToken);
+        if (!CanProviderViewDetail(header.Status, header.SelectedProviderId, provider.Id, hasBid)
+            && !await HasActiveAppointmentForProviderAsync(requestId, provider.Id, cancellationToken))
+        {
+            return null;
+        }
+
+        return await LoadRequestDetailAsync(requestId, provider.Id, cancellationToken);
     }
 
     /// <summary>
@@ -216,10 +227,7 @@ public sealed class ServiceRequestAppService(
     public async Task<BidFormAccess> GetBidFormAsync(
         Guid userId, Guid requestId, CancellationToken cancellationToken)
     {
-        var request = await db.ServiceRequests.AsNoTracking()
-            .Include(r => r.Bids).ThenInclude(b => b.Provider)
-            .Include(r => r.Category)
-            .FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken);
+        var request = await LoadRequestDetailAsync(requestId, providerBidFilter: null, cancellationToken);
 
         if (request is null)
         {
@@ -631,10 +639,14 @@ public sealed class ServiceRequestAppService(
         }
     }
 
-    private static bool CanProviderViewDetail(ServiceRequest request, Guid providerId) =>
-        request.SelectedProviderId == providerId
-        || OpenMatchingStatuses.Contains(request.Status)
-        || request.Bids.Any(b => b.ProviderId == providerId);
+    private static bool CanProviderViewDetail(
+        ServiceRequestStatus status,
+        Guid? selectedProviderId,
+        Guid providerId,
+        bool hasBidFromProvider) =>
+        selectedProviderId == providerId
+        || OpenMatchingStatuses.Contains(status)
+        || hasBidFromProvider;
 
     private async Task<bool> HasActiveAppointmentForProviderAsync(
         Guid requestId, Guid providerId, CancellationToken cancellationToken) =>
@@ -675,7 +687,6 @@ public sealed class ServiceRequestAppService(
         var categoryIds = coverageLinks.Select(c => c.CategoryId).Distinct().ToArray();
         var openQuery = db.ServiceRequests.AsNoTracking()
             .Include(r => r.Category)
-            .Include(r => r.Bids)
             .Where(r =>
                 r.Source == ServiceRequestSource.Marketplace
                 && OpenMatchingStatuses.Contains(r.Status)
@@ -688,6 +699,8 @@ public sealed class ServiceRequestAppService(
         }
 
         var openRequests = await openQuery.ToListAsync(cancellationToken);
+        var bidStats = await LoadProviderInboxBidStatsAsync(
+            openRequests.Select(r => r.Id), provider.Id, cancellationToken);
 
         foreach (var request in openRequests)
         {
@@ -698,7 +711,8 @@ public sealed class ServiceRequestAppService(
             }
 
             seenIds.Add(request.Id);
-            results.Add(ToSummary(request, provider.Id, userId, distance));
+            bidStats.TryGetValue(request.Id, out var stats);
+            results.Add(ToSummary(request, provider.Id, userId, distance, stats));
         }
     }
 
@@ -714,7 +728,6 @@ public sealed class ServiceRequestAppService(
     {
         var activeQuery = db.ServiceRequests.AsNoTracking()
             .Include(r => r.Category)
-            .Include(r => r.Bids)
             .Where(r =>
                 ProviderActiveEngagementStatuses.Contains(r.Status)
                 && (includeOwnRequests || r.RequesterUserId != userId)
@@ -730,6 +743,8 @@ public sealed class ServiceRequestAppService(
         }
 
         var activeEngagements = await activeQuery.ToListAsync(cancellationToken);
+        var engagementBidStats = await LoadProviderInboxBidStatsAsync(
+            activeEngagements.Select(r => r.Id), provider.Id, cancellationToken);
         var activeIds = activeEngagements.Select(r => r.Id).ToList();
         var appointments = activeIds.Count == 0
             ? []
@@ -759,11 +774,13 @@ public sealed class ServiceRequestAppService(
             var apptStatusStr = appointmentByRequest.TryGetValue(request.Id, out var apptStatus)
                 ? apptStatus.ToString()
                 : null;
+            engagementBidStats.TryGetValue(request.Id, out var stats);
             results.Add(ToSummary(
                 request,
                 provider.Id,
                 userId,
                 distance,
+                stats,
                 pendingConfirmRequestIds.Contains(request.Id),
                 apptStatusStr));
         }
@@ -813,7 +830,6 @@ public sealed class ServiceRequestAppService(
 
         var query = db.ServiceRequests.AsNoTracking()
             .Include(r => r.Category)
-            .Include(r => r.Bids)
             .Where(r => missingIds.Contains(r.Id)
                 && (includeOwnRequests || r.RequesterUserId != userId));
         if (excludeSmokeTestData)
@@ -822,6 +838,8 @@ public sealed class ServiceRequestAppService(
         }
 
         var requests = await query.ToListAsync(cancellationToken);
+        var terminalBidStats = await LoadProviderInboxBidStatsAsync(
+            requests.Select(r => r.Id), provider.Id, cancellationToken);
         foreach (var request in requests)
         {
             if (!seenIds.Add(request.Id))
@@ -833,11 +851,13 @@ public sealed class ServiceRequestAppService(
                 ? null
                 : NearestCoverageDistance(coverageLinks, request);
             statusByRequest.TryGetValue(request.Id, out var apptStatus);
+            terminalBidStats.TryGetValue(request.Id, out var stats);
             results.Add(ToSummary(
                 request,
                 provider.Id,
                 userId,
                 distance,
+                stats,
                 needsAppointmentConfirm: false,
                 appointmentStatus: apptStatus));
         }
@@ -866,27 +886,73 @@ public sealed class ServiceRequestAppService(
         Guid providerId,
         Guid viewerUserId,
         double? distanceMeters,
+        RequestBidStats bidStats,
         bool needsAppointmentConfirm = false,
-        string? appointmentStatus = null)
-    {
-        var alreadyBid = request.Bids.Any(b =>
-            b.ProviderId == providerId
-            && (b.Status == BidStatus.Submitted || b.Status == BidStatus.Selected));
-
-        return new ServiceRequestSummaryDto(
+        string? appointmentStatus = null) =>
+        new(
             request.Id,
             request.Title,
             request.Status.ToString(),
             request.Category.Name,
             request.CreatedAt,
-            request.Bids.Count(b => b.Status != BidStatus.Withdrawn),
+            bidStats.ActiveBidCount,
             request.BudgetText,
             distanceMeters,
-            alreadyBid,
+            bidStats.ProviderAlreadyBid,
             needsAppointmentConfirm,
             request.RequesterUserId == viewerUserId,
             AppointmentStatus: appointmentStatus);
+
+    private readonly record struct RequestBidStats(int ActiveBidCount, bool ProviderAlreadyBid);
+
+    private async Task<ServiceRequest?> LoadRequestDetailAsync(
+        Guid requestId,
+        Guid? providerBidFilter,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<ServiceRequest> query = db.ServiceRequests
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(r => r.Category);
+
+        query = providerBidFilter is Guid providerId
+            ? query.Include(r => r.Bids.Where(b => b.ProviderId == providerId)).ThenInclude(b => b.Provider)
+            : query.Include(r => r.Bids).ThenInclude(b => b.Provider);
+
+        return await query.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken);
     }
+
+    private async Task<Dictionary<Guid, RequestBidStats>> LoadProviderInboxBidStatsAsync(
+        IEnumerable<Guid> requestIds,
+        Guid providerId,
+        CancellationToken cancellationToken)
+    {
+        var ids = requestIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return [];
+        }
+
+        var rows = await db.Bids.AsNoTracking()
+            .Where(b => ids.Contains(b.ServiceRequestId))
+            .Select(b => new { b.ServiceRequestId, b.ProviderId, b.Status })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(b => b.ServiceRequestId)
+            .ToDictionary(
+                g => g.Key,
+                g => new RequestBidStats(
+                    g.Count(b => b.Status != BidStatus.Withdrawn),
+                    g.Any(b => b.ProviderId == providerId
+                        && (b.Status == BidStatus.Submitted || b.Status == BidStatus.Selected))));
+    }
+
+    private Task<bool> ProviderHasBidOnRequestAsync(
+        Guid requestId, Guid providerId, CancellationToken cancellationToken) =>
+        db.Bids.AsNoTracking().AnyAsync(
+            b => b.ServiceRequestId == requestId && b.ProviderId == providerId,
+            cancellationToken);
 
     private static string DisplayStatus(
         ServiceRequestStatus status,

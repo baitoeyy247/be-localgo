@@ -17,7 +17,8 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         var price = NormalizeBid(request);
         var provider = await MarketplaceAccess.RequireProviderForUserAsync(db, userId, cancellationToken);
 
-        var serviceRequest = await db.ServiceRequests.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
+        var serviceRequest = await db.ServiceRequests
+            .FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
 
         if (serviceRequest.Status is not ServiceRequestStatus.Open and not ServiceRequestStatus.HasOffers)
@@ -97,7 +98,8 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         var request = await db.ServiceRequests.AsNoTracking().FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
 
-        IQueryable<Bid> query = db.Bids.AsNoTracking().Include(b => b.Provider)
+        IQueryable<Bid> query = db.Bids.AsNoTracking()
+            .Include(b => b.Provider)
             .Where(b => b.ServiceRequestId == requestId && b.Status != BidStatus.Withdrawn);
 
         if (!isAdmin && request.RequesterUserId != viewerUserId)

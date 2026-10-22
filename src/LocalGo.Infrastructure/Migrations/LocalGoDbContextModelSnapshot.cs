@@ -75,14 +75,14 @@ namespace LocalGo.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DeclineReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<Point>("Location")
                         .HasColumnType("geography (Point,4326)");
 
                     b.Property<string>("Note")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("DeclineReason")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
@@ -106,12 +106,12 @@ namespace LocalGo.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProviderId");
-
                     b.HasIndex("RequesterUserId");
 
                     b.HasIndex("ServiceRequestId")
                         .IsUnique();
+
+                    b.HasIndex("ProviderId", "Status");
 
                     b.ToTable("appointments", (string)null);
                 });
@@ -404,7 +404,7 @@ namespace LocalGo.Infrastructure.Migrations
 
                     b.HasIndex("CategoryId");
 
-                    b.HasIndex("ProviderId");
+                    b.HasIndex("ProviderId", "CategoryId", "IsActive");
 
                     b.ToTable("provider_services", (string)null);
                 });
@@ -663,6 +663,8 @@ namespace LocalGo.Infrastructure.Migrations
                     b.HasIndex("Source");
 
                     b.HasIndex("Status", "LastProgressAt");
+
+                    b.HasIndex("Source", "Status", "CategoryId");
 
                     b.ToTable("service_requests", (string)null);
                 });

@@ -74,6 +74,7 @@ internal sealed class ProviderServiceConfiguration : IEntityTypeConfiguration<Pr
         builder.Property(x => x.Title).HasMaxLength(120).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(2000);
         builder.Property(x => x.BasePriceText).HasMaxLength(100);
+        builder.HasIndex(x => new { x.ProviderId, x.CategoryId, x.IsActive });
     }
 }
 
@@ -107,6 +108,7 @@ internal sealed class ServiceRequestConfiguration : IEntityTypeConfiguration<Ser
         builder.HasOne(x => x.ProviderService).WithMany().HasForeignKey(x => x.ProviderServiceId)
             .OnDelete(DeleteBehavior.SetNull);
         builder.HasIndex(x => x.Source);
+        builder.HasIndex(x => new { x.Source, x.Status, x.CategoryId });
         builder.HasOne(x => x.Appointment).WithOne(x => x.ServiceRequest).HasForeignKey<Appointment>(x => x.ServiceRequestId);
     }
 }
@@ -134,6 +136,7 @@ internal sealed class AppointmentConfiguration : IEntityTypeConfiguration<Appoin
         builder.ToTable("appointments");
         builder.HasKey(x => x.Id);
         builder.HasIndex(x => x.ServiceRequestId).IsUnique();
+        builder.HasIndex(x => new { x.ProviderId, x.Status });
         builder.Property(x => x.AddressText).HasMaxLength(500);
         builder.Property(x => x.Note).HasMaxLength(2000);
         builder.Property(x => x.DeclineReason).HasMaxLength(2000);

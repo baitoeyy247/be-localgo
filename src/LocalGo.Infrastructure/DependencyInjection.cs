@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddHttpClient("line");
 
         services.AddSingleton<IBackgroundWork, BackgroundWork>();
+        services.AddHostedService<DatabaseWarmupHostedService>();
         services.AddHostedService<RequestExpirationHostedService>();
         services.AddHostedService<NotificationRetryHostedService>();
 

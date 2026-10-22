@@ -7,6 +7,8 @@ public static class GlossaryMessages
 {
     public const string WithdrawBid = "ถอนข้อเสนอ";
     public const string BidWithdrawn = "ถอนข้อเสนอแล้ว";
+    public const string SubmitBid = "เสนอราคา";
+    public const string BidSubmitted = "ส่งข้อเสนอแล้ว";
     public const string CancelAppointment = "ยกเลิกนัดหมาย";
     public const string BudgetOpenChoice = "ให้ผู้ให้บริการเสนอราคา";
     public const string JobStatusOpenOffers = "เปิดรับข้อเสนอ";
