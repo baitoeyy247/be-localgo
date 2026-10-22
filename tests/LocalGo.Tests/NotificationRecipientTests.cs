@@ -38,7 +38,7 @@ public sealed class NotificationRecipientTests
                 new SubmitBidRequest("500", 500, null, null, null),
                 CancellationToken.None));
 
-        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(403, ex.StatusCode);
         Assert.Contains("ไม่ตรง", ex.Message, StringComparison.Ordinal);
     }
 

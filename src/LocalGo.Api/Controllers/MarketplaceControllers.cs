@@ -491,7 +491,11 @@ public sealed class AppointmentsController(ICurrentUserService currentUser, Appo
         var userId = currentUser.UserId ?? throw new UnauthorizedAccessException();
         if (!Enum.TryParse<AppointmentStatus>(status, true, out var parsed))
         {
-            return BadRequest();
+            return Problem(
+                detail: $"สถานะนัดหมายไม่ถูกต้อง: \"{status}\"",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: ApiProblem.ForStatus(400).Title,
+                type: ApiProblem.ForStatus(400).Type);
         }
 
         var appointment = await appointments.UpdateStatusAsync(

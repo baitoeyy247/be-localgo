@@ -5,7 +5,8 @@ namespace LocalGo.Application.Common;
 /// <summary>Provider may start/complete work shortly before the scheduled appointment time.</summary>
 public static class AppointmentStartWindow
 {
-    public static readonly TimeSpan EarlyStartAllowed = TimeSpan.FromMinutes(30);
+    /// <summary>No early start — provider may begin at or after the scheduled appointment time (matches UI copy).</summary>
+    public static readonly TimeSpan EarlyStartAllowed = TimeSpan.Zero;
 
     public static DateTime ToUtc(DateTime value)
     {

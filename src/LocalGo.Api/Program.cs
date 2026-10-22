@@ -42,10 +42,34 @@ builder.Services.AddApiMapping();
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, token) =>
+    {
+        var retryAfterSec = 60;
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            retryAfterSec = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
+        }
+
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.Headers.RetryAfter = retryAfterSec.ToString();
+        context.HttpContext.Response.ContentType = "application/problem+json";
+        var (problemType, title) = LocalGo.Application.Common.ApiProblem.ForStatus(429);
+        var detail = $"คุณทำรายการบ่อยเกินไป ลองใหม่ภายใน {retryAfterSec} วินาที";
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new
+            {
+                type = problemType,
+                title,
+                status = 429,
+                detail,
+                traceId = context.HttpContext.TraceIdentifier,
+            },
+            cancellationToken: token);
+    };
     options.AddFixedWindowLimiter("api", limiter =>
     {
         limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.PermitLimit = 200;
+        limiter.PermitLimit = builder.Environment.IsStaging() ? 600 : 200;
         limiter.QueueLimit = 0;
     });
 });

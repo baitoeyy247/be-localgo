@@ -126,10 +126,11 @@ public sealed class GlobalExceptionMiddleware(
             }
         }
 
+        var (problemType, title) = ApiProblem.ForStatus((int)status);
         var problem = new
         {
-            type = "https://localgo.local/errors/internal",
-            title = "Server error",
+            type = problemType,
+            title,
             status = (int)status,
             detail = resolvedDetail,
             traceId = context.TraceIdentifier,

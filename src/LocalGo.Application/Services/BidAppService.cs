@@ -33,7 +33,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
                 cancellationToken);
         if (!hasMatchingService)
         {
-            throw new AppException("งานนี้ไม่ตรงกับบริการของคุณ", 400);
+            throw new AppException("งานนี้ไม่ตรงกับบริการของคุณ", 403);
         }
 
         var now = DateTime.UtcNow;
