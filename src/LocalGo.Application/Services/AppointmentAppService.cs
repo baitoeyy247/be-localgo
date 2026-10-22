@@ -190,10 +190,9 @@ public sealed class AppointmentAppService(
 
         await MarketplaceAccess.EnsureServiceRequestViewerAsync(db, userId, serviceRequest, cancellationToken);
 
-        // Include Cancelled/Rejected so both parties see the terminal status after refresh.
-        return await db.Appointments.AsNoTracking()
-            .Include(a => a.Provider)
-            .FirstOrDefaultAsync(a => a.ServiceRequestId == requestId, cancellationToken);
+        var ctx = (DbContext)(object)db;
+        return await MarketplaceCompiledQueries.GetAppointmentByRequestIdAsync(
+            ctx, requestId, cancellationToken);
     }
 
     /// <summary>Loads an appointment by id for a participant (requester or provider owner).</summary>
@@ -225,7 +224,6 @@ public sealed class AppointmentAppService(
         CancellationToken cancellationToken = default)
     {
         var appointment = await db.Appointments.Include(a => a.ServiceRequest)
-            .ThenInclude(r => r.Bids)
             .FirstOrDefaultAsync(a => a.Id == appointmentId, cancellationToken)
             ?? throw new AppException("Appointment not found.", 404);
 
@@ -413,11 +411,15 @@ public sealed class AppointmentAppService(
             return;
         }
 
-        // Provider declined — free the request so requester can pick another offer or rebook.
-        foreach (var bid in request.Bids.Where(b => b.Status == BidStatus.Selected))
+        var requestId = request.Id;
+        var now = DateTime.UtcNow;
+        var selectedBids = await db.Bids
+            .Where(b => b.ServiceRequestId == requestId && b.Status == BidStatus.Selected)
+            .ToListAsync(cancellationToken);
+        foreach (var bid in selectedBids)
         {
             bid.Status = BidStatus.Rejected;
-            bid.UpdatedAt = DateTime.UtcNow;
+            bid.UpdatedAt = now;
         }
 
         request.SelectedProviderId = null;
@@ -429,12 +431,11 @@ public sealed class AppointmentAppService(
         }
         else
         {
-            var openBids = request.Bids.Count(b => b.Status is BidStatus.Submitted);
+            var openBids = await db.Bids.AsNoTracking().CountAsync(
+                b => b.ServiceRequestId == requestId && b.Status == BidStatus.Submitted,
+                cancellationToken);
             request.Status = openBids > 0 ? ServiceRequestStatus.HasOffers : ServiceRequestStatus.Open;
         }
-
-        await Task.CompletedTask;
-        _ = cancellationToken;
     }
 
     private async Task NotifyOtherPartyAsync(

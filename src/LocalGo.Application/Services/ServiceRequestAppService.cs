@@ -182,16 +182,9 @@ public sealed class ServiceRequestAppService(
             return await LoadRequestDetailAsync(requestId, providerBidFilter: null, cancellationToken);
         }
 
-        var header = await db.ServiceRequests.AsNoTracking()
-            .Where(r => r.Id == requestId)
-            .Select(r => new
-            {
-                r.Id,
-                r.RequesterUserId,
-                r.Status,
-                r.SelectedProviderId,
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+        var ctx = (DbContext)(object)db;
+        var header = await MarketplaceCompiledQueries.GetRequestAccessHeaderAsync(
+            ctx, requestId, cancellationToken);
 
         if (header is null)
         {
@@ -910,16 +903,15 @@ public sealed class ServiceRequestAppService(
         Guid? providerBidFilter,
         CancellationToken cancellationToken)
     {
-        IQueryable<ServiceRequest> query = db.ServiceRequests
-            .AsNoTracking()
-            .AsSplitQuery()
-            .Include(r => r.Category);
+        var ctx = (DbContext)(object)db;
+        if (providerBidFilter is Guid providerId)
+        {
+            return await MarketplaceCompiledQueries.GetRequestDetailProviderBidsAsync(
+                ctx, requestId, providerId, cancellationToken);
+        }
 
-        query = providerBidFilter is Guid providerId
-            ? query.Include(r => r.Bids.Where(b => b.ProviderId == providerId)).ThenInclude(b => b.Provider)
-            : query.Include(r => r.Bids).ThenInclude(b => b.Provider);
-
-        return await query.FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken);
+        return await MarketplaceCompiledQueries.GetRequestDetailAllBidsAsync(
+            ctx, requestId, cancellationToken);
     }
 
     private async Task<Dictionary<Guid, RequestBidStats>> LoadProviderInboxBidStatsAsync(
