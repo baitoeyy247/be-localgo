@@ -473,6 +473,8 @@ public sealed class AppointmentAppService(
                 categoryId = request.CategoryId,
                 categoryName,
                 status = appointment.Status.ToString(),
+                scheduledAt = appointment.ScheduledAt,
+                declineReason = appointment.DeclineReason,
             };
 
             if (requester is not null

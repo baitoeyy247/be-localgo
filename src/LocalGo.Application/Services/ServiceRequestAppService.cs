@@ -337,6 +337,20 @@ public sealed class ServiceRequestAppService(
     public async Task CancelAsync(Guid userId, Guid requestId, CancellationToken cancellationToken)
     {
         var entity = await MarketplaceAccess.RequireOwnedRequestAsync(db, userId, requestId, cancellationToken);
+        var appointment = await db.Appointments
+            .FirstOrDefaultAsync(a => a.ServiceRequestId == requestId, cancellationToken);
+        if (!RequestCancellationPolicy.CanCancel(entity.Status, appointment?.Status))
+        {
+            throw new AppException("งานนี้ไม่สามารถยกเลิกได้ในสถานะปัจจุบัน", 409);
+        }
+
+        if (appointment is not null
+            && appointment.Status is AppointmentStatus.Pending or AppointmentStatus.Confirmed or AppointmentStatus.Rejected)
+        {
+            appointment.Status = AppointmentStatus.Cancelled;
+            appointment.UpdatedAt = DateTime.UtcNow;
+        }
+
         var providerIds = await db.Bids.AsNoTracking()
             .Where(b => b.ServiceRequestId == requestId && b.Status != BidStatus.Withdrawn)
             .Select(b => b.ProviderId)

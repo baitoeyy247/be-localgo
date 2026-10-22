@@ -71,6 +71,23 @@ public sealed class ConsoleNotificationSender(
                     return s;
                 }
             }
+
+            // L-N3: flex bubbles carry title + body in contents.body.contents; log the full text, not only altText.
+            if (doc.RootElement.TryGetProperty("contents", out var bubble)
+                && bubble.TryGetProperty("body", out var bodyBox)
+                && bodyBox.TryGetProperty("contents", out var items)
+                && items.ValueKind == JsonValueKind.Array)
+            {
+                var parts = items.EnumerateArray()
+                    .Skip(1)
+                    .Select(i => i.TryGetProperty("text", out var tx) ? tx.GetString() : null)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+                if (parts.Count > 0)
+                {
+                    return string.Join('\n', parts);
+                }
+            }
         }
         catch
         {

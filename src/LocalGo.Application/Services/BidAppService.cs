@@ -223,7 +223,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         await db.SaveChangesAsync(cancellationToken);
         if (changed)
         {
-            await NotifyRequesterAboutBidAsync(NotificationEvents.BidUpdated, userId, provider.Name, bid, cancellationToken);
+            await NotifyRequesterAboutBidAsync(NotificationEvents.BidUpdated, userId, provider.Name, bid, cancellationToken, previousAmount, previousPriceText);
         }
 
         return bid;
@@ -286,7 +286,8 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
 
     /// <summary>M-N2: notifies the request owner after a bid is updated or withdrawn (post-commit, best-effort).</summary>
     private async Task NotifyRequesterAboutBidAsync(
-        string eventType, Guid actorUserId, string providerName, Bid bid, CancellationToken cancellationToken)
+        string eventType, Guid actorUserId, string providerName, Bid bid, CancellationToken cancellationToken,
+        decimal? previousAmount = null, string? previousPriceText = null)
     {
         var ctx = await db.ServiceRequests.AsNoTracking()
             .Where(r => r.Id == bid.ServiceRequestId)
@@ -328,6 +329,8 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
                 providerName,
                 priceText = bid.PriceText,
                 amount = bid.Amount,
+                previousAmount,
+                previousPriceText,
             },
             cancellationToken,
             "Bid change saved but notification enqueue failed. Event={Event} RequestId={RequestId} BidId={BidId}",

@@ -100,6 +100,13 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
                     rating = review.Rating,
                     reviewType = review.ReviewType.ToString(),
                     serviceRequestId = review.ServiceRequestId,
+                    requestId = review.ServiceRequestId,
+                    appointmentId = review.ServiceRequestId is null
+                        ? (Guid?)null
+                        : await db.Appointments.AsNoTracking()
+                            .Where(a => a.ServiceRequestId == review.ServiceRequestId)
+                            .Select(a => (Guid?)a.Id)
+                            .FirstOrDefaultAsync(cancellationToken),
                 },
                 cancellationToken);
         }

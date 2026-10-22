@@ -48,8 +48,11 @@ public static class NotificationMessageBuilder
                 null),
 
             NotificationEvents.AppointmentUpdated => (
-                "อัปเดตสถานะนัดหมาย",
-                JoinLines(serviceBlock, $"สถานะ: {FormatAppointmentStatus(GetStr(payload, "status"))}"),
+                AppointmentUpdatedTitle(GetStr(payload, "status")),
+                JoinLines(
+                    serviceBlock,
+                    AppointmentUpdatedDetail(GetStr(payload, "status"), GetStr(payload, "declineReason")),
+                    FormatScheduledAt(GetStr(payload, "scheduledAt"))),
                 null),
 
             NotificationEvents.RequestExpiringSoon => (
@@ -76,14 +79,12 @@ public static class NotificationMessageBuilder
 
             NotificationEvents.BidUpdated => (
                 "ข้อเสนอมีการเปลี่ยนแปลง",
-                JoinLines(
-                    serviceBlock,
-                    $"{GetStr(payload, "providerName")} ปรับราคาข้อเสนอเป็น {FormatBidPrice(payload)} บาท"),
+                JoinLines(serviceBlock, BidUpdatedDetail(payload, ctx?.Title)),
                 $"/requester/bids?requestId={GetStr(payload, "requestId")}"),
 
             NotificationEvents.BidWithdrawn => (
                 "ผู้ให้บริการถอนข้อเสนอ",
-                JoinLines(serviceBlock, $"{GetStr(payload, "providerName")} ถอนข้อเสนอแล้ว"),
+                JoinLines(serviceBlock, $"{ProviderOrDefault(payload)} ถอนข้อเสนอสำหรับ{TitleOrDefault(ctx?.Title)}แล้ว"),
                 $"/requester/bids?requestId={GetStr(payload, "requestId")}"),
 
             NotificationEvents.AccountSuspended => (
@@ -240,6 +241,72 @@ public static class NotificationMessageBuilder
         "Rejected" => "ผู้ให้บริการปฏิเสธ",
         _ => status,
     };
+
+    private static string AppointmentUpdatedTitle(string status) => status switch
+    {
+        "Pending" => "นัดหมายถูกเลื่อน รอผู้ให้บริการยืนยัน",
+        "Confirmed" => "ผู้ให้บริการยืนยันนัดหมายแล้ว",
+        "InProgress" => "ผู้ให้บริการเริ่มงานแล้ว",
+        "Completed" => "งานเสร็จสิ้นแล้ว",
+        "Cancelled" => "นัดหมายถูกยกเลิก",
+        "Rejected" => "ผู้ให้บริการปฏิเสธนัดหมาย",
+        _ => "อัปเดตสถานะนัดหมาย",
+    };
+
+    private static string AppointmentUpdatedDetail(string status, string declineReason) => status switch
+    {
+        "Pending" => "มีการเปลี่ยนวันเวลานัด กรุณาตรวจสอบและยืนยันอีกครั้ง",
+        "Confirmed" => "นัดหมายได้รับการยืนยันแล้ว",
+        "InProgress" => "งานกำลังดำเนินการ",
+        "Completed" => "งานปิดเรียบร้อย คุณสามารถให้รีวิวได้",
+        "Cancelled" => "นัดหมายนี้ถูกยกเลิกแล้ว",
+        "Rejected" => string.IsNullOrWhiteSpace(declineReason)
+            ? "คุณสามารถเลือกข้อเสนออื่นหรือนัดใหม่ได้"
+            : $"เหตุผล: {declineReason.Trim()}",
+        _ => $"สถานะ: {FormatAppointmentStatus(status)}",
+    };
+
+    internal static string FormatScheduledAt(string scheduledAt)
+    {
+        if (!DateTime.TryParse(scheduledAt, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var utc))
+        {
+            return "";
+        }
+
+        var th = utc.AddHours(7);
+        return $"วันเวลา: {th:dd/MM}/{th.Year + 543} {th:HH:mm} น.";
+    }
+
+    private static string ProviderOrDefault(JsonElement? payload)
+    {
+        var name = GetStr(payload, "providerName").Trim();
+        return string.IsNullOrEmpty(name) ? "ผู้ให้บริการ" : name;
+    }
+
+    private static string TitleOrDefault(string? title) =>
+        string.IsNullOrWhiteSpace(title) ? "งานของคุณ" : $"งาน “{title.Trim()}” ";
+
+    private static string BidUpdatedDetail(JsonElement? payload, string? title)
+    {
+        var next = FormatBidPrice(payload);
+        var prev = FormatAmount(GetStr(payload, "previousAmount"), GetStr(payload, "previousPriceText"));
+        var who = ProviderOrDefault(payload);
+        var what = TitleOrDefault(title).TrimEnd();
+        return !string.IsNullOrEmpty(prev) && prev != next
+            ? $"{who} ปรับราคา{what} จาก {prev} เป็น {next} บาท"
+            : $"{who} แก้ไขข้อเสนอ{what} ราคา {next} บาท";
+    }
+
+    private static string FormatAmount(string amount, string priceText)
+    {
+        if (decimal.TryParse(amount, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var d))
+        {
+            return d.ToString("#,0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return priceText.Replace("บาท", string.Empty).Trim();
+    }
 
     private static string FormatBidPrice(JsonElement? payload)
     {

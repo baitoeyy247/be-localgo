@@ -161,8 +161,8 @@ public sealed class NotificationPublisherTests
     }
 
     [Theory]
-    [InlineData(NotificationEvents.BidUpdated, "ปรับราคาข้อเสนอเป็น 1,500 บาท")]
-    [InlineData(NotificationEvents.BidWithdrawn, "ถอนข้อเสนอแล้ว")]
+    [InlineData(NotificationEvents.BidUpdated, "ช่างเอ แก้ไขข้อเสนองานของคุณ ราคา 1,500 บาท")]
+    [InlineData(NotificationEvents.BidWithdrawn, "ช่างเอ ถอนข้อเสนอสำหรับงานของคุณแล้ว")]
     [InlineData(NotificationEvents.AccountSuspended, "ถูกระงับ")]
     [InlineData(NotificationEvents.AccountReactivated, "กลับมาใช้งานได้")]
     public async Task EnqueueAsync_console_mode_new_events_are_sent_with_message(string eventType, string expected)

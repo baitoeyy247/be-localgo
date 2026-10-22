@@ -136,7 +136,7 @@ public sealed class NotificationMessageBuilderTests
             $"/requester/appointment?requestId={seed.Request.Id}",
             json,
             StringComparison.Ordinal);
-        Assert.Contains("ผู้ให้บริการยืนยันนัดแล้ว", json, StringComparison.Ordinal);
+        Assert.Contains("ผู้ให้บริการยืนยันนัดหมายแล้ว", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -180,5 +180,44 @@ public sealed class NotificationMessageBuilderTests
         var json = JsonSerializer.Serialize(message, JsonOpts);
         Assert.Contains("ผู้ประกาศยกเลิกงานนี้แล้ว", json, StringComparison.Ordinal);
         Assert.Contains("/provider/requests", json, StringComparison.Ordinal);
+    }
+
+    private static async Task<string> BuildTextAsync(string evt, string json)
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var payload = JsonDocument.Parse(json).RootElement;
+        var (_, message) = await NotificationMessageBuilder.BuildAsync(evt, payload, "", db, null, CancellationToken.None);
+        return JsonSerializer.Serialize(message, JsonOpts);
+    }
+
+    [Fact]
+    public async Task L_N3_BidUpdated_includes_title_old_new_price_and_provider()
+    {
+        var text = await BuildTextAsync(NotificationEvents.BidUpdated,
+            """{"title":"ซ่อมท่อรั่ว","providerName":"ช่างเอ","amount":510,"previousAmount":500}""");
+        Assert.Contains("ช่างเอ ปรับราคางาน “ซ่อมท่อรั่ว” จาก 500 เป็น 510 บาท", text);
+    }
+
+    [Fact]
+    public async Task L_N3_BidWithdrawn_includes_title_and_provider()
+    {
+        var text = await BuildTextAsync(NotificationEvents.BidWithdrawn,
+            """{"title":"ซ่อมท่อรั่ว","providerName":"ช่างเอ"}""");
+        Assert.Contains("ช่างเอ ถอนข้อเสนอสำหรับงาน “ซ่อมท่อรั่ว” แล้ว", text);
+    }
+
+    [Fact]
+    public async Task L_N3_AppointmentUpdated_six_statuses_are_distinct_and_include_datetime()
+    {
+        var texts = new HashSet<string>();
+        foreach (var st in new[] { "Pending", "Confirmed", "InProgress", "Completed", "Cancelled", "Rejected" })
+        {
+            var t = await BuildTextAsync(NotificationEvents.AppointmentUpdated,
+                $$"""{"title":"ซ่อมท่อรั่ว","status":"{{st}}","scheduledAt":"2026-10-23T03:00:00Z"}""");
+            Assert.Contains("วันเวลา: 23/10/2569 10:00 น.", t);
+            texts.Add(t);
+        }
+
+        Assert.Equal(6, texts.Count);
     }
 }
