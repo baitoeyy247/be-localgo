@@ -44,7 +44,7 @@ public static class DependencyInjection
         services.AddScoped<ConsoleNotificationSender>();
         services.AddScoped<INotificationSender>(sp =>
         {
-            var notify = configuration.GetSection(NotifySettings.SectionName).Get<NotifySettings>() ?? new NotifySettings();
+            var notify = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<NotifySettings>>().Value;
             return notify.IsConsole
                 ? sp.GetRequiredService<ConsoleNotificationSender>()
                 : sp.GetRequiredService<LineNotificationSender>();
