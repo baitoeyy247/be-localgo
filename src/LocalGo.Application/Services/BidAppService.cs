@@ -243,9 +243,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
 
         if (bid.Status != BidStatus.Submitted)
         {
-            throw new AppException(
-                $"Cannot withdraw bid with status '{bid.Status}'. Only submitted bids can be withdrawn.",
-                409);
+            throw new AppException(GlossaryMessages.WithdrawBidInvalidStatus, 409);
         }
 
         bid.Status = BidStatus.Withdrawn;

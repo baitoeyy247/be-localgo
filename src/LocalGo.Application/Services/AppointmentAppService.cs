@@ -377,7 +377,7 @@ public sealed class AppointmentAppService(
             case (AppointmentStatus.Confirmed, AppointmentStatus.Cancelled):
                 return;
             case (_, AppointmentStatus.Cancelled):
-                throw new AppException("Cannot cancel appointment in the current status.", 409);
+                throw new AppException(GlossaryMessages.CancelAppointmentInvalidStatus, 409);
             default:
                 throw new AppException("ไม่สามารถเปลี่ยนสถานะนัดหมายในขั้นตอนนี้", 409);
         }
