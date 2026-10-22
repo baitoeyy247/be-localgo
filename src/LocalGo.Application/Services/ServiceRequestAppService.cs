@@ -196,21 +196,24 @@ public sealed class ServiceRequestAppService(
             return await LoadRequestDetailAsync(requestId, providerBidFilter: null, cancellationToken);
         }
 
-        var provider = await db.Providers.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.OwnerUserId == viewerUserId, cancellationToken);
-        if (provider is null)
+        var viewAccess = await MarketplaceCompiledQueries.GetProviderRequestViewAccessAsync(
+            ctx, requestId, viewerUserId, cancellationToken);
+        if (viewAccess is null)
         {
             return null;
         }
 
-        var hasBid = await ProviderHasBidOnRequestAsync(requestId, provider.Id, cancellationToken);
-        if (!CanProviderViewDetail(header.Status, header.SelectedProviderId, provider.Id, hasBid)
-            && !await HasActiveAppointmentForProviderAsync(requestId, provider.Id, cancellationToken))
+        if (!CanProviderViewDetail(
+                header.Status,
+                header.SelectedProviderId,
+                viewAccess.ProviderId,
+                viewAccess.HasBid)
+            && !viewAccess.HasActiveAppointment)
         {
             return null;
         }
 
-        return await LoadRequestDetailAsync(requestId, provider.Id, cancellationToken);
+        return await LoadRequestDetailAsync(requestId, viewAccess.ProviderId, cancellationToken);
     }
 
     /// <summary>
@@ -641,14 +644,6 @@ public sealed class ServiceRequestAppService(
         || OpenMatchingStatuses.Contains(status)
         || hasBidFromProvider;
 
-    private async Task<bool> HasActiveAppointmentForProviderAsync(
-        Guid requestId, Guid providerId, CancellationToken cancellationToken) =>
-        await db.Appointments.AsNoTracking().AnyAsync(
-            a => a.ServiceRequestId == requestId
-                && a.ProviderId == providerId
-                && a.Status != AppointmentStatus.Cancelled,
-            cancellationToken);
-
     private async Task<List<CoverageLink>> LoadCoverageLinksAsync(Guid providerId, CancellationToken cancellationToken)
     {
         var activeServices = await db.ProviderServices.AsNoTracking()
@@ -677,21 +672,13 @@ public sealed class ServiceRequestAppService(
         HashSet<Guid> seenIds,
         CancellationToken cancellationToken)
     {
-        var categoryIds = coverageLinks.Select(c => c.CategoryId).Distinct().ToArray();
-        var openQuery = db.ServiceRequests.AsNoTracking()
-            .Include(r => r.Category)
-            .Where(r =>
-                r.Source == ServiceRequestSource.Marketplace
-                && OpenMatchingStatuses.Contains(r.Status)
-                && categoryIds.Contains(r.CategoryId)
-                && (includeOwnRequests || r.RequesterUserId != userId));
-
-        if (excludeSmokeTestData)
-        {
-            openQuery = openQuery.Where(r => r.Title != SmokeTestRequestTitle);
-        }
-
-        var openRequests = await openQuery.ToListAsync(cancellationToken);
+        var openRequests = await LoadMatchingRequestRowsAsync(
+            userId,
+            coverageLinks,
+            excludeSmokeTestData,
+            includeOwnRequests,
+            marketplaceOpenOnly: true,
+            cancellationToken);
         var bidStats = await LoadProviderInboxBidStatsAsync(
             openRequests.Select(r => r.Id), provider.Id, cancellationToken);
 
@@ -720,7 +707,6 @@ public sealed class ServiceRequestAppService(
         CancellationToken cancellationToken)
     {
         var activeQuery = db.ServiceRequests.AsNoTracking()
-            .Include(r => r.Category)
             .Where(r =>
                 ProviderActiveEngagementStatuses.Contains(r.Status)
                 && (includeOwnRequests || r.RequesterUserId != userId)
@@ -735,7 +721,7 @@ public sealed class ServiceRequestAppService(
             activeQuery = activeQuery.Where(r => r.Title != SmokeTestRequestTitle);
         }
 
-        var activeEngagements = await activeQuery.ToListAsync(cancellationToken);
+        var activeEngagements = await ProjectMatchingRows(activeQuery).ToListAsync(cancellationToken);
         var engagementBidStats = await LoadProviderInboxBidStatsAsync(
             activeEngagements.Select(r => r.Id), provider.Id, cancellationToken);
         var activeIds = activeEngagements.Select(r => r.Id).ToList();
@@ -822,7 +808,6 @@ public sealed class ServiceRequestAppService(
             .ToDictionary(g => g.Key, g => g.First().Status.ToString());
 
         var query = db.ServiceRequests.AsNoTracking()
-            .Include(r => r.Category)
             .Where(r => missingIds.Contains(r.Id)
                 && (includeOwnRequests || r.RequesterUserId != userId));
         if (excludeSmokeTestData)
@@ -830,7 +815,7 @@ public sealed class ServiceRequestAppService(
             query = query.Where(r => r.Title != SmokeTestRequestTitle);
         }
 
-        var requests = await query.ToListAsync(cancellationToken);
+        var requests = await ProjectMatchingRows(query).ToListAsync(cancellationToken);
         var terminalBidStats = await LoadProviderInboxBidStatsAsync(
             requests.Select(r => r.Id), provider.Id, cancellationToken);
         foreach (var request in requests)
@@ -856,23 +841,67 @@ public sealed class ServiceRequestAppService(
         }
     }
 
-    private static double? NearestCoverageDistance(IReadOnlyList<CoverageLink> coverageLinks, ServiceRequest request)
+    private static double? NearestCoverageDistance(IReadOnlyList<CoverageLink> coverageLinks, ServiceRequest request) =>
+        NearestCoverageDistance(
+            coverageLinks,
+            request.CategoryId,
+            request.Latitude,
+            request.Longitude,
+            request.SearchRadiusMeters);
+
+    private static double? NearestCoverageDistance(IReadOnlyList<CoverageLink> coverageLinks, MatchingRequestRow request) =>
+        NearestCoverageDistance(
+            coverageLinks,
+            request.CategoryId,
+            request.Latitude,
+            request.Longitude,
+            request.SearchRadiusMeters);
+
+    private static double? NearestCoverageDistance(
+        IReadOnlyList<CoverageLink> coverageLinks,
+        Guid categoryId,
+        double latitude,
+        double longitude,
+        int searchRadiusMeters)
     {
+        var requestPoint = GeoHelper.CreatePoint(latitude, longitude);
         var nearest = coverageLinks
-            .Where(c => c.CategoryId == request.CategoryId)
+            .Where(c => c.CategoryId == categoryId)
             .Select(c => new
             {
                 c.Branch,
                 Distance = GeoHelper.DistanceMeters(
                     GeoHelper.CreatePoint(c.Branch.Latitude, c.Branch.Longitude),
-                    GeoHelper.CreatePoint(request.Latitude, request.Longitude)),
+                    requestPoint),
             })
-            .Where(x => x.Distance <= request.SearchRadiusMeters && x.Distance <= x.Branch.ServiceRadiusMeters)
+            .Where(x => x.Distance <= searchRadiusMeters && x.Distance <= x.Branch.ServiceRadiusMeters)
             .OrderBy(x => x.Distance)
             .FirstOrDefault();
 
         return nearest?.Distance;
     }
+
+    private static ServiceRequestSummaryDto ToSummary(
+        MatchingRequestRow request,
+        Guid providerId,
+        Guid viewerUserId,
+        double? distanceMeters,
+        RequestBidStats bidStats,
+        bool needsAppointmentConfirm = false,
+        string? appointmentStatus = null) =>
+        new(
+            request.Id,
+            request.Title,
+            request.Status.ToString(),
+            request.CategoryName,
+            request.CreatedAt,
+            bidStats.ActiveBidCount,
+            request.BudgetText,
+            distanceMeters,
+            bidStats.ProviderAlreadyBid,
+            needsAppointmentConfirm,
+            request.RequesterUserId == viewerUserId,
+            AppointmentStatus: appointmentStatus);
 
     private static ServiceRequestSummaryDto ToSummary(
         ServiceRequest request,
@@ -940,11 +969,73 @@ public sealed class ServiceRequestAppService(
                         && (b.Status == BidStatus.Submitted || b.Status == BidStatus.Selected))));
     }
 
-    private Task<bool> ProviderHasBidOnRequestAsync(
-        Guid requestId, Guid providerId, CancellationToken cancellationToken) =>
-        db.Bids.AsNoTracking().AnyAsync(
-            b => b.ServiceRequestId == requestId && b.ProviderId == providerId,
-            cancellationToken);
+    private static IQueryable<MatchingRequestRow> ProjectMatchingRows(IQueryable<ServiceRequest> query) =>
+        query.Select(r => new MatchingRequestRow(
+            r.Id,
+            r.Title,
+            r.Status,
+            r.Category.Name,
+            r.CreatedAt,
+            r.BudgetText,
+            r.RequesterUserId,
+            r.CategoryId,
+            r.Latitude,
+            r.Longitude,
+            r.SearchRadiusMeters));
+
+    private async Task<List<MatchingRequestRow>> LoadMatchingRequestRowsAsync(
+        Guid userId,
+        IReadOnlyList<CoverageLink> coverageLinks,
+        bool excludeSmokeTestData,
+        bool includeOwnRequests,
+        bool marketplaceOpenOnly,
+        CancellationToken cancellationToken)
+    {
+        var categoryIds = coverageLinks.Select(c => c.CategoryId).Distinct().ToArray();
+        var filtered = db.ServiceRequests.AsNoTracking()
+            .Where(r =>
+                categoryIds.Contains(r.CategoryId)
+                && (includeOwnRequests || r.RequesterUserId != userId));
+
+        if (marketplaceOpenOnly)
+        {
+            filtered = filtered.Where(r =>
+                r.Source == ServiceRequestSource.Marketplace
+                && OpenMatchingStatuses.Contains(r.Status));
+        }
+
+        if (excludeSmokeTestData)
+        {
+            filtered = filtered.Where(r => r.Title != SmokeTestRequestTitle);
+        }
+
+        var ctx = (DbContext)(object)db;
+        if (MatchingGeoQuery.SupportsDistanceFilter(ctx))
+        {
+            var linkRefs = coverageLinks
+                .Select(l => new MatchingGeoQuery.LinkRef(
+                    l.CategoryId,
+                    new MatchingGeoQuery.BranchRef(
+                        l.Branch.Id,
+                        l.Branch.Latitude,
+                        l.Branch.Longitude,
+                        l.Branch.ServiceRadiusMeters)))
+                .ToList();
+            var ids = await MatchingGeoQuery.FilterRequestIdsWithinCoverageAsync(
+                ctx, filtered, linkRefs, cancellationToken);
+            if (ids.Count == 0)
+            {
+                return [];
+            }
+
+            filtered = filtered.Where(r => ids.Contains(r.Id));
+        }
+
+        var rows = await ProjectMatchingRows(filtered).ToListAsync(cancellationToken);
+        return rows
+            .Where(r => NearestCoverageDistance(coverageLinks, r) is not null)
+            .ToList();
+    }
 
     private static string DisplayStatus(
         ServiceRequestStatus status,
@@ -1071,6 +1162,19 @@ public sealed class ServiceRequestAppService(
             .ToList();
 
     private sealed record CoverageLink(Guid CategoryId, ProviderBranch Branch);
+
+    private sealed record MatchingRequestRow(
+        Guid Id,
+        string Title,
+        ServiceRequestStatus Status,
+        string CategoryName,
+        DateTime CreatedAt,
+        string? BudgetText,
+        Guid RequesterUserId,
+        Guid CategoryId,
+        double Latitude,
+        double Longitude,
+        int SearchRadiusMeters);
 }
 
 public sealed record BidFormAccess(bool Allowed, string? Reason, ServiceRequest? Request, string? ReasonCode = null);

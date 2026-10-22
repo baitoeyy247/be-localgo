@@ -184,13 +184,19 @@ public sealed class AppointmentAppService(
     public async Task<Appointment?> GetByRequestIdAsync(
         Guid userId, Guid requestId, CancellationToken cancellationToken)
     {
-        var serviceRequest = await db.ServiceRequests.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == requestId, cancellationToken)
+        var ctx = (DbContext)(object)db;
+        var header = await MarketplaceCompiledQueries.GetRequestAccessHeaderAsync(
+            ctx, requestId, cancellationToken)
             ?? throw new AppException("Request not found.", 404);
 
-        await MarketplaceAccess.EnsureServiceRequestViewerAsync(db, userId, serviceRequest, cancellationToken);
+        await MarketplaceAccess.EnsureServiceRequestViewerAsync(
+            db,
+            userId,
+            header.Id,
+            header.RequesterUserId,
+            header.SelectedProviderId,
+            cancellationToken);
 
-        var ctx = (DbContext)(object)db;
         return await MarketplaceCompiledQueries.GetAppointmentByRequestIdAsync(
             ctx, requestId, cancellationToken);
     }

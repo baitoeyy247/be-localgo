@@ -1,13 +1,16 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace LocalGo.Api.Controllers;
 
 [ApiController]
 [Route("api/health")]
-public sealed class HealthController(HealthCheckService healthCheckService) : ControllerBase
+public sealed class HealthController(HealthCheckService healthCheckService, IMemoryCache cache) : ControllerBase
 {
+    private static readonly TimeSpan FullHealthCacheTtl = TimeSpan.FromSeconds(5);
+    private const string FullHealthCacheKey = "health:full";
     private static readonly string BuildCommit = ResolveCommit();
 
     private static string ResolveCommit()
@@ -34,6 +37,13 @@ public sealed class HealthController(HealthCheckService healthCheckService) : Co
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
+        if (cache.TryGetValue(FullHealthCacheKey, out CachedHealthPayload? cached) && cached is not null)
+        {
+            return cached.IsHealthy
+                ? Ok(cached.Body)
+                : StatusCode(StatusCodes.Status503ServiceUnavailable, cached.Body);
+        }
+
         var report = await healthCheckService.CheckHealthAsync(cancellationToken);
 
         string Status(HealthStatus status) => status == HealthStatus.Healthy ? "Healthy" : "Unhealthy";
@@ -57,8 +67,15 @@ public sealed class HealthController(HealthCheckService healthCheckService) : Co
             commit = BuildCommit,
         };
 
+        cache.Set(
+            FullHealthCacheKey,
+            new CachedHealthPayload(apiHealthy, result),
+            new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = FullHealthCacheTtl });
+
         return apiHealthy
             ? Ok(result)
             : StatusCode(StatusCodes.Status503ServiceUnavailable, result);
     }
+
+    private sealed record CachedHealthPayload(bool IsHealthy, object Body);
 }

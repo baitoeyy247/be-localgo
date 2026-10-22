@@ -1,4 +1,5 @@
 using LocalGo.Application.Abstractions.Persistence;
+using LocalGo.Application.Services;
 using LocalGo.Domain.Entities;
 using LocalGo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -68,26 +69,44 @@ internal static class MarketplaceAccess
         ServiceRequest serviceRequest,
         CancellationToken cancellationToken)
     {
-        if (serviceRequest.RequesterUserId == userId)
+        await EnsureServiceRequestViewerAsync(
+            db,
+            userId,
+            serviceRequest.Id,
+            serviceRequest.RequesterUserId,
+            serviceRequest.SelectedProviderId,
+            cancellationToken);
+    }
+
+    public static async Task EnsureServiceRequestViewerAsync(
+        ILocalGoDbContext db,
+        Guid userId,
+        Guid requestId,
+        Guid requesterUserId,
+        Guid? selectedProviderId,
+        CancellationToken cancellationToken)
+    {
+        if (requesterUserId == userId)
         {
             return;
         }
 
-        var provider = await db.Providers.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.OwnerUserId == userId, cancellationToken);
-        if (provider is null)
+        var ctx = (DbContext)(object)db;
+        var access = await MarketplaceCompiledQueries.GetProviderRequestViewAccessAsync(
+            ctx, requestId, userId, cancellationToken);
+        if (access is null)
         {
             throw new AppException("Forbidden.", 403);
         }
 
-        if (serviceRequest.SelectedProviderId == provider.Id)
+        if (selectedProviderId == access.ProviderId)
         {
             return;
         }
 
         var hasSelectedBid = await db.Bids.AsNoTracking().AnyAsync(
-            b => b.ServiceRequestId == serviceRequest.Id
-                && b.ProviderId == provider.Id
+            b => b.ServiceRequestId == requestId
+                && b.ProviderId == access.ProviderId
                 && b.Status == BidStatus.Selected,
             cancellationToken);
         if (hasSelectedBid)
@@ -95,12 +114,7 @@ internal static class MarketplaceAccess
             return;
         }
 
-        var hasAppointment = await db.Appointments.AsNoTracking().AnyAsync(
-            a => a.ServiceRequestId == serviceRequest.Id
-                && a.ProviderId == provider.Id
-                && a.Status != AppointmentStatus.Cancelled,
-            cancellationToken);
-        if (hasAppointment)
+        if (access.HasActiveAppointment)
         {
             return;
         }

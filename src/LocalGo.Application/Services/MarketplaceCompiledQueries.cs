@@ -12,6 +12,11 @@ internal static class MarketplaceCompiledQueries
         Domain.Enums.ServiceRequestStatus Status,
         Guid? SelectedProviderId);
 
+    internal sealed record ProviderRequestViewAccess(
+        Guid ProviderId,
+        bool HasBid,
+        bool HasActiveAppointment);
+
     private static readonly Func<DbContext, Guid, IAsyncEnumerable<RequestAccessHeader>> RequestAccessHeaderQuery =
         EF.CompileAsyncQuery((DbContext ctx, Guid id) =>
             ctx.Set<ServiceRequest>().AsNoTracking()
@@ -42,6 +47,18 @@ internal static class MarketplaceCompiledQueries
                 .Include(a => a.Provider)
                 .Where(a => a.ServiceRequestId == requestId));
 
+    private static readonly Func<DbContext, Guid, Guid, IAsyncEnumerable<ProviderRequestViewAccess>> ProviderRequestViewAccessQuery =
+        EF.CompileAsyncQuery((DbContext ctx, Guid requestId, Guid ownerUserId) =>
+            ctx.Set<Provider>().AsNoTracking()
+                .Where(p => p.OwnerUserId == ownerUserId)
+                .Select(p => new ProviderRequestViewAccess(
+                    p.Id,
+                    ctx.Set<Bid>().Any(b => b.ServiceRequestId == requestId && b.ProviderId == p.Id),
+                    ctx.Set<Appointment>().Any(a =>
+                        a.ServiceRequestId == requestId
+                        && a.ProviderId == p.Id
+                        && a.Status != Domain.Enums.AppointmentStatus.Cancelled))));
+
     internal static async Task<RequestAccessHeader?> GetRequestAccessHeaderAsync(
         DbContext ctx, Guid requestId, CancellationToken cancellationToken) =>
         await RequestAccessHeaderQuery(ctx, requestId).FirstOrDefaultAsync(cancellationToken);
@@ -57,4 +74,8 @@ internal static class MarketplaceCompiledQueries
     internal static async Task<Appointment?> GetAppointmentByRequestIdAsync(
         DbContext ctx, Guid requestId, CancellationToken cancellationToken) =>
         await AppointmentByRequestIdQuery(ctx, requestId).FirstOrDefaultAsync(cancellationToken);
+
+    internal static async Task<ProviderRequestViewAccess?> GetProviderRequestViewAccessAsync(
+        DbContext ctx, Guid requestId, Guid ownerUserId, CancellationToken cancellationToken) =>
+        await ProviderRequestViewAccessQuery(ctx, requestId, ownerUserId).FirstOrDefaultAsync(cancellationToken);
 }

@@ -37,6 +37,7 @@ if (!string.IsNullOrWhiteSpace(port))
     builder.WebHost.UseUrls($"http://+:{port}");
 }
 
+builder.Services.AddMemoryCache();
 builder.Services.AddControllers();
 builder.Services.AddApiMapping();
 builder.Services.AddRateLimiter(options =>
