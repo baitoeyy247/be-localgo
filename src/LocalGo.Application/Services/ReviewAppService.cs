@@ -87,7 +87,7 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
             throw new AppException("คุณรีวิวงานนี้แล้ว", 409);
         }
 
-        var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == provider.OwnerUserId, cancellationToken);
+        var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == provider.OwnerUserId, CancellationToken.None);
         if (owner is not null && NotificationRecipients.ShouldNotify(owner.Id, userId))
         {
             await notifications.EnqueueAsync(
@@ -106,9 +106,9 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
                         : await db.Appointments.AsNoTracking()
                             .Where(a => a.ServiceRequestId == review.ServiceRequestId)
                             .Select(a => (Guid?)a.Id)
-                            .FirstOrDefaultAsync(cancellationToken),
+                            .FirstOrDefaultAsync(CancellationToken.None),
                 },
-                cancellationToken);
+                CancellationToken.None);
         }
 
         return new ReviewCreatedDto(

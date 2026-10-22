@@ -37,7 +37,8 @@ public sealed class NotificationPublisher(
         };
 
         db.NotificationLogs.Add(log);
-        await db.SaveChangesAsync(cancellationToken);
+        // N-1: the outbox row must be written even if the caller's request was aborted.
+        await db.SaveChangesAsync(CancellationToken.None);
 
         // Dispatch must not depend on the caller's request lifetime (client abort would leave Pending).
         await TrySendAsync(log, CancellationToken.None);

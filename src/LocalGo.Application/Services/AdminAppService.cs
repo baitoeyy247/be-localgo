@@ -125,7 +125,7 @@ public sealed class AdminAppService(
                 user.Id,
                 user.LineUserId,
                 new { userId = user.Id, status = parsed.ToString() },
-                cancellationToken,
+                CancellationToken.None,
                 "User status changed but notification enqueue failed. Event={Event} UserId={UserId}",
                 eventType,
                 user.Id);

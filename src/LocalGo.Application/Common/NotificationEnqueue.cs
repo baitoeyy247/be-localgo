@@ -18,7 +18,8 @@ internal static class NotificationEnqueue
     {
         try
         {
-            await notifications.EnqueueAsync(eventType, userId, lineUserId, payload, cancellationToken);
+            // N-1: enqueue is post-commit; detach from the caller (HTTP request) token.
+            await notifications.EnqueueAsync(eventType, userId, lineUserId, payload, CancellationToken.None);
         }
         catch (Exception ex)
         {

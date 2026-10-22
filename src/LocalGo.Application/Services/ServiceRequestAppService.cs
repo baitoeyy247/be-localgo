@@ -109,7 +109,7 @@ public sealed class ServiceRequestAppService(
     {
         if (background is null)
         {
-            await NotifyMatchingProvidersByIdAsync(requestId, cancellationToken);
+            await NotifyMatchingProvidersByIdAsync(requestId, CancellationToken.None);
             return;
         }
 
@@ -379,7 +379,7 @@ public sealed class ServiceRequestAppService(
         var categoryName = await db.ServiceCategories.AsNoTracking()
             .Where(c => c.Id == entity.CategoryId)
             .Select(c => c.Name)
-            .FirstOrDefaultAsync(cancellationToken) ?? "";
+            .FirstOrDefaultAsync(CancellationToken.None) ?? "";
         var notified = new HashSet<Guid>();
         foreach (var owner in owners)
         {
@@ -402,7 +402,7 @@ public sealed class ServiceRequestAppService(
                     categoryId = entity.CategoryId,
                     categoryName,
                 },
-                cancellationToken,
+                CancellationToken.None,
                 "Request cancelled but notification enqueue failed. RequestId={RequestId} RecipientId={RecipientId}",
                 entity.Id,
                 owner.Id);
@@ -626,7 +626,7 @@ public sealed class ServiceRequestAppService(
             var categoryName = await db.ServiceCategories.AsNoTracking()
                 .Where(c => c.Id == serviceRequest.CategoryId)
                 .Select(c => c.Name)
-                .FirstAsync(cancellationToken);
+                .FirstAsync(CancellationToken.None);
 
             await NotificationEnqueue.TryExcludingActorAsync(
                 logger,
@@ -643,7 +643,7 @@ public sealed class ServiceRequestAppService(
                     categoryName,
                     directFromSearch = true,
                 },
-                cancellationToken,
+                CancellationToken.None,
                 "Provider selected but notification enqueue failed. RequestId={RequestId} ProviderId={ProviderId}",
                 requestId,
                 providerId);

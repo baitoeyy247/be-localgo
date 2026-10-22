@@ -453,6 +453,9 @@ public sealed class AppointmentAppService(
         string eventType,
         CancellationToken cancellationToken)
     {
+        // N-1: notify runs post-commit; never bound to the HTTP request token (client abort).
+        cancellationToken = CancellationToken.None;
+
         try
         {
             var requester = await db.Users.AsNoTracking()

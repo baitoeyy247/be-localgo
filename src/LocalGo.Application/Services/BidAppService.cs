@@ -56,13 +56,13 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         }
 
         var requester = await db.Users.AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == serviceRequest.RequesterUserId, cancellationToken);
+            .FirstOrDefaultAsync(u => u.Id == serviceRequest.RequesterUserId, CancellationToken.None);
         if (requester is not null)
         {
             var categoryName = await db.ServiceCategories.AsNoTracking()
                 .Where(c => c.Id == serviceRequest.CategoryId)
                 .Select(c => c.Name)
-                .FirstAsync(cancellationToken);
+                .FirstAsync(CancellationToken.None);
 
             await NotificationEnqueue.TryExcludingActorAsync(
                 logger,
@@ -81,7 +81,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
                     providerName = provider.Name,
                     priceText = bid.PriceText,
                 },
-                cancellationToken,
+                CancellationToken.None,
                 "Bid submitted but notification enqueue failed. RequestId={RequestId} BidId={BidId} RequesterId={RequesterId}",
                 requestId,
                 bid.Id,
@@ -173,13 +173,13 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         await db.SaveChangesAsync(cancellationToken);
 
         var provider = await db.Providers.AsNoTracking().Include(p => p.OwnerUser)
-            .FirstOrDefaultAsync(p => p.Id == selected.ProviderId, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == selected.ProviderId, CancellationToken.None);
         if (provider?.OwnerUser is not null)
         {
             var categoryName = await db.ServiceCategories.AsNoTracking()
                 .Where(c => c.Id == serviceRequest.CategoryId)
                 .Select(c => c.Name)
-                .FirstAsync(cancellationToken);
+                .FirstAsync(CancellationToken.None);
 
             await NotificationEnqueue.TryExcludingActorAsync(
                 logger,
@@ -195,7 +195,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
                     categoryId = serviceRequest.CategoryId,
                     categoryName,
                 },
-                cancellationToken,
+                CancellationToken.None,
                 "Bid selected but notification enqueue failed. RequestId={RequestId} BidId={BidId}",
                 requestId,
                 selected.Id);
@@ -289,6 +289,9 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         string eventType, Guid actorUserId, string providerName, Bid bid, CancellationToken cancellationToken,
         decimal? previousAmount = null, string? previousPriceText = null)
     {
+        // N-1: notify runs post-commit; never bound to the HTTP request token (client abort).
+        cancellationToken = CancellationToken.None;
+
         var ctx = await db.ServiceRequests.AsNoTracking()
             .Where(r => r.Id == bid.ServiceRequestId)
             .Select(r => new { r.Id, r.Title, r.CategoryId, r.RequesterUserId })
