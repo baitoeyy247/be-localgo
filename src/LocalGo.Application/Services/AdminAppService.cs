@@ -13,8 +13,24 @@ public sealed class AdminAppService(
     ILocalGoDbContext db,
     ReviewAppService reviews,
     INotificationPublisher? notifications = null,
-    ILogger<AdminAppService>? logger = null)
+    ILogger<AdminAppService>? logger = null,
+    string? environmentName = null)
 {
+    /// <summary>LINE ids of every dev/test account start with this; real LINE users never do.</summary>
+    public const string DevLinePrefix = "dev-";
+
+    private string EffectiveEnvironment =>
+        environmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+
+    /// <summary>Hard refusal: destructive maintenance never runs in Production.</summary>
+    public void EnsureNotProduction(string operation)
+    {
+        if (string.Equals(EffectiveEnvironment, "Production", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"{operation} is refused in Production.");
+        }
+    }
+
     public const string TestUserLinePrefix = "dev-persona-";
 
     /// <summary>Known SIT request whose verified review was attached to the wrong provider.</summary>
@@ -140,6 +156,7 @@ public sealed class AdminAppService(
         CancellationToken cancellationToken,
         bool seedSampleReviews = true)
     {
+        EnsureNotProduction(nameof(RepairSitPlaytestDataAsync));
         var qaProviderId = await (
             from p in db.Providers.AsNoTracking()
             join u in db.Users.AsNoTracking() on p.OwnerUserId equals u.Id
@@ -215,6 +232,9 @@ public sealed class AdminAppService(
             : 0;
         var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
 
+        logger?.LogWarning(
+            "RepairSitPlaytestData: reviewReassigned={Reassigned} staleRequestsRemoved={Stale} deletedAutomatedUsers={Users} providersRecalculated={Providers}",
+            reassigned, staleIds.Count, deletedAutomatedUsers, providersTouched);
         return new
         {
             reviewReassigned = reassigned,
@@ -231,6 +251,7 @@ public sealed class AdminAppService(
     /// </summary>
     public async Task<object> ResetTestDataAsync(CancellationToken cancellationToken)
     {
+        EnsureNotProduction(nameof(ResetTestDataAsync));
         var testUsers = await db.Users
             .Where(u => u.LineUserId.StartsWith(TestUserLinePrefix))
             .ToListAsync(cancellationToken);
@@ -381,10 +402,12 @@ public sealed class AdminAppService(
     /// <summary>Removes leftover automated-test users (e.g. Appt Flow) while keeping dev-persona accounts.</summary>
     public async Task<int> PurgeAutomatedTestUsersAsync(CancellationToken cancellationToken)
     {
+        EnsureNotProduction(nameof(PurgeAutomatedTestUsersAsync));
         var junkUsers = await db.Users
-            .Where(u => !u.LineUserId.StartsWith(TestUserLinePrefix)
-                || (u.DisplayName != null
-                    && (u.DisplayName.Contains("Appt Flow") || u.DisplayName.Contains("Appt flow"))))
+            // Only dev-* accounts named "Appt Flow" — never a real LINE user, never a persona.
+            .Where(u => u.LineUserId.StartsWith(DevLinePrefix)
+                && u.DisplayName != null
+                && (u.DisplayName.Contains("Appt Flow") || u.DisplayName.Contains("Appt flow")))
             .ToListAsync(cancellationToken);
         if (junkUsers.Count == 0)
         {
@@ -421,6 +444,8 @@ public sealed class AdminAppService(
 
         db.Users.RemoveRange(junkUsers);
         await db.SaveChangesAsync(cancellationToken);
+        logger?.LogWarning("PurgeAutomatedTestUsers deleted {Users} users, {Providers} providers, {Requests} requests",
+            junkUsers.Count, junkProviderIds.Count, junkRequestIds.Count);
         db.ClearChangeTracker();
         return junkUsers.Count;
     }

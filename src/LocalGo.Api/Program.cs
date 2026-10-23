@@ -161,18 +161,25 @@ if (isDevOrSit)
     var migrateLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitMigrate");
     await AppointmentSchemaBootstrap.EnsureDeclineReasonColumnAsync(db, migrateLogger);
 
-    await DataSeeder.SeedAsync(db);
-
-    // One-shot SIT repair: move mis-assigned review onto QA ผู้ให้ 01 and drop stale BKK test rows.
-    try
+    // Seed/repair is opt-in only (one-off): SIT_RUN_STARTUP_REPAIR=true. Never on a plain restart.
+    if (LocalGo.Application.Services.StartupMaintenance.ShouldRunStartupRepair(
+            app.Environment.EnvironmentName, builder.Configuration["SIT_RUN_STARTUP_REPAIR"]))
     {
-        var admin = scope.ServiceProvider.GetRequiredService<LocalGo.Application.Services.AdminAppService>();
-        await admin.RepairSitPlaytestDataAsync(CancellationToken.None, seedSampleReviews: false);
+        migrateLogger.LogWarning("SIT_RUN_STARTUP_REPAIR=true: running seeder + playtest repair");
+        await DataSeeder.SeedAsync(db);
+        try
+        {
+            var admin = scope.ServiceProvider.GetRequiredService<LocalGo.Application.Services.AdminAppService>();
+            await admin.RepairSitPlaytestDataAsync(CancellationToken.None, seedSampleReviews: false);
+        }
+        catch (Exception ex)
+        {
+            migrateLogger.LogWarning(ex, "SIT playtest data repair skipped");
+        }
     }
-    catch (Exception ex)
+    else
     {
-        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SitRepair");
-        logger.LogWarning(ex, "SIT playtest data repair skipped");
+        migrateLogger.LogInformation("Startup seed/repair skipped (SIT_RUN_STARTUP_REPAIR not set)");
     }
 }
 

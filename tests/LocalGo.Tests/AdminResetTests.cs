@@ -85,7 +85,7 @@ public sealed class AdminResetTests
         db.Reviews.Add(review);
         await db.SaveChangesAsync();
 
-        var admin = new AdminAppService(db, new ReviewAppService(db, TestDbFactory.NoopNotifications()));
+        var admin = new AdminAppService(db, new ReviewAppService(db, TestDbFactory.NoopNotifications()), environmentName: "Staging");
         await admin.ResetTestDataAsync(CancellationToken.None);
         Assert.Equal(2, await db.Users.CountAsync(u => u.LineUserId.StartsWith(AdminAppService.TestUserLinePrefix)));
         Assert.Equal(0, await db.ServiceRequests.CountAsync(r => r.Id == request.Id));
