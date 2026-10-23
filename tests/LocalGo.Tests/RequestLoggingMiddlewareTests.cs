@@ -27,7 +27,7 @@ public class RequestLoggingMiddlewareTests
         await mw.InvokeAsync(ctx);
         var line = Assert.Single(logger.Lines);
         Assert.StartsWith("[REQ] PATCH /api/appointments/abc 200 ", line);
-        Assert.EndsWith("ms", line);
+        Assert.Matches(@" \d+ms rid=[0-9a-f]{12}$", line);
         Assert.DoesNotContain("secret", line);
     }
 
@@ -38,6 +38,8 @@ public class RequestLoggingMiddlewareTests
         var mw = new RequestLoggingMiddleware(_ => Task.CompletedTask, logger);
         var ctx = new DefaultHttpContext();
         ctx.Request.Path = "/health";
+        await mw.InvokeAsync(ctx);
+        ctx.Request.Path = "/api/health";
         await mw.InvokeAsync(ctx);
         Assert.Empty(logger.Lines);
     }
