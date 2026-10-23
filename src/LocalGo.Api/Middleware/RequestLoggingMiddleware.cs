@@ -8,7 +8,7 @@ namespace LocalGo.Api.Middleware;
 /// Sets X-Request-Id and Server-Timing (app;dur=NN) so the SIT console log can match browser ↔ server.
 /// Never logs bodies, headers or tokens. Aborted requests are marked so cut-off calls are traceable.
 /// </summary>
-public sealed class RequestLoggingMiddleware(RequestDelegate next, ILogger<RequestLoggingMiddleware> logger)
+public sealed class RequestLoggingMiddleware(RequestDelegate next, ILogger<RequestLoggingMiddleware> logger, IHostEnvironment? env = null)
 {
     public async Task InvokeAsync(HttpContext context)
     {
@@ -25,6 +25,7 @@ public sealed class RequestLoggingMiddleware(RequestDelegate next, ILogger<Reque
         context.Response.OnStarting(() =>
         {
             context.Response.Headers["X-Request-Id"] = rid;
+            if (env is not null && !LocalGo.Api.Controllers.DevLoginGate.DiagnosticsEnabled(env)) return Task.CompletedTask; // R47: no Server-Timing in Production
             // P-1: split app into load / save / notify.
             var app = sw.Elapsed.TotalMilliseconds;
             var save = timing.SaveMs;
