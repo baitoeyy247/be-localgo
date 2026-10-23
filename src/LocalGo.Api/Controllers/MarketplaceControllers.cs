@@ -591,8 +591,9 @@ public sealed class AdminController(
     }
 
     [HttpPost("test-data/reset")]
-    public async Task<IActionResult> ResetTestData(CancellationToken cancellationToken)
+    public async Task<IActionResult> ResetTestData([FromServices] IConfiguration config, [FromServices] IWebHostEnvironment env, CancellationToken cancellationToken)
     {
+        if (!DevLoginGate.IsEnabled(config, env)) return NotFound();
         await AppointmentSchemaBootstrap.EnsureSitListIndexesAsync(efDb, cancellationToken);
         return Ok(await admin.ResetTestDataAsync(cancellationToken));
     }
@@ -605,8 +606,9 @@ public sealed class AdminController(
     }
 
     [HttpPost("test-data/repair")]
-    public async Task<IActionResult> RepairTestData(CancellationToken cancellationToken)
+    public async Task<IActionResult> RepairTestData([FromServices] IConfiguration config, [FromServices] IWebHostEnvironment env, CancellationToken cancellationToken)
     {
+        if (!DevLoginGate.IsEnabled(config, env)) return NotFound();
         await AppointmentSchemaBootstrap.EnsureSitListIndexesAsync(efDb, cancellationToken);
         return Ok(await admin.RepairSitPlaytestDataAsync(cancellationToken));
     }

@@ -22,17 +22,11 @@ public sealed class AuthController(
 
     [HttpPost("dev/login")]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
-    public async Task<IActionResult> DevLogin([FromBody] DevLoginRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> DevLogin([FromBody] DevLoginRequest request, [FromServices] IConfiguration config, CancellationToken cancellationToken)
     {
-        if (!environment.IsDevelopment() && !environment.IsStaging())
+        if (!DevLoginGate.IsEnabled(config, environment))
         {
             return NotFound();
-        }
-
-        // Temporary SIT test mode: allow admin persona while Staging is used for QA playtests.
-        if (request.AsAdmin && !(environment.IsDevelopment() || environment.IsStaging()))
-        {
-            return StatusCode(StatusCodes.Status403Forbidden);
         }
 
         var response = await devAuth.LoginAsync(request, cancellationToken);

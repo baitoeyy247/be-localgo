@@ -29,6 +29,7 @@ ApplyEnvOverride(builder.Configuration, "LINE_CHANNEL_ID", "Line:ChannelId");
 ApplyEnvOverride(builder.Configuration, "LINE_CHANNEL_SECRET", "Line:ChannelSecret");
 ApplyEnvOverride(builder.Configuration, "LINE_MESSAGING_ACCESS_TOKEN", "Line:MessagingAccessToken");
 ApplyEnvOverride(builder.Configuration, "LINE_LIFF_ID", "Line:LiffId");
+ApplyEnvOverride(builder.Configuration, "ALLOW_DEV_LOGIN", LocalGo.Api.Controllers.DevLoginGate.ConfigKey);
 ApplyEnvOverride(builder.Configuration, "NOTIFY_MODE", "Notify:Mode");
 ApplyEnvOverride(builder.Configuration, "NGROK_PUBLIC_URL", "Cors:NgrokPublicUrl");
 
