@@ -830,12 +830,31 @@ public sealed class AdminController(
         }));
     }
 
+    /// <summary>
+    /// NV-1 (R46): admin-only, read-only. Optional filters from/to (UTC), eventType, page/pageSize (≤100).
+    /// Each row carries recipient + rendered Thai title/body so QA can verify without Render logs.
+    /// Response stays a JSON array (backward compatible); total count in X-Total-Count.
+    /// </summary>
     [HttpGet("notifications")]
-    public async Task<IActionResult> Notifications(CancellationToken cancellationToken)
+    public async Task<IActionResult> Notifications(
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] string? eventType = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100,
+        CancellationToken cancellationToken = default)
     {
-        var rows = await db.NotificationLogs.AsNoTracking()
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var q = db.NotificationLogs.AsNoTracking();
+        if (from is { } f) q = q.Where(n => n.CreatedAt >= DateTime.SpecifyKind(f.ToUniversalTime(), DateTimeKind.Utc));
+        if (to is { } t) q = q.Where(n => n.CreatedAt < DateTime.SpecifyKind(t.ToUniversalTime(), DateTimeKind.Utc));
+        if (!string.IsNullOrWhiteSpace(eventType)) q = q.Where(n => n.EventType == eventType);
+        var total = await q.CountAsync(cancellationToken);
+        var rows = await q
             .OrderByDescending(n => n.CreatedAt)
-            .Take(100)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(n => new
             {
                 n.Id,
@@ -845,19 +864,88 @@ public sealed class AdminController(
                 n.SentAt,
                 n.ErrorMessage,
                 n.RetryCount,
+                n.UserId,
+                RecipientDisplayName = n.User != null ? n.User.DisplayName : null,
+                n.PayloadJson,
             })
             .ToListAsync(cancellationToken);
 
-        return Ok(rows.Select(n => new
+        var result = new List<object>(rows.Count);
+        foreach (var n in rows)
         {
-            n.Id,
-            n.EventType,
-            type = n.EventType,
-            status = n.Status.ToString(),
-            n.CreatedAt,
-            n.SentAt,
-            n.ErrorMessage,
-            attemptCount = n.RetryCount,
-        }));
+            string? title = null;
+            string? body = null;
+            string? relatedId = null;
+            try
+            {
+                System.Text.Json.JsonElement? payload = string.IsNullOrWhiteSpace(n.PayloadJson)
+                    ? null
+                    : System.Text.Json.JsonDocument.Parse(n.PayloadJson).RootElement;
+                if (payload is { ValueKind: System.Text.Json.JsonValueKind.Object } pe)
+                {
+                    foreach (var key in new[] { "appointmentId", "bidId", "requestId", "providerId" })
+                    {
+                        if (pe.TryGetProperty(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            relatedId = v.GetString();
+                            break;
+                        }
+                    }
+                }
+
+                var (alt, message) = await LocalGo.Infrastructure.Notifications.NotificationMessageBuilder.BuildAsync(
+                    n.EventType, payload, string.Empty, db, n.UserId, cancellationToken);
+                title = alt;
+                body = string.Join(" | ", CollectTexts(System.Text.Json.JsonSerializer.SerializeToElement(message)).Where(x => x != alt).Distinct());
+            }
+            catch (Exception)
+            {
+                // preview is best-effort; never fail the list
+            }
+
+            result.Add(new
+            {
+                n.Id,
+                n.EventType,
+                type = n.EventType,
+                status = n.Status.ToString(),
+                n.CreatedAt,
+                n.SentAt,
+                n.ErrorMessage,
+                attemptCount = n.RetryCount,
+                recipientUserId = n.UserId,
+                recipientDisplayName = n.RecipientDisplayName,
+                title,
+                body,
+                relatedId,
+            });
+        }
+
+        Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return Ok(result);
+    }
+
+    private static IEnumerable<string> CollectTexts(System.Text.Json.JsonElement e)
+    {
+        if (e.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            foreach (var prop in e.EnumerateObject())
+            {
+                if (prop.Name == "text" && prop.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var t = prop.Value.GetString();
+                    if (!string.IsNullOrWhiteSpace(t)) yield return t;
+                }
+                else
+                {
+                    foreach (var x in CollectTexts(prop.Value)) yield return x;
+                }
+            }
+        }
+        else if (e.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var item in e.EnumerateArray())
+            foreach (var x in CollectTexts(item)) yield return x;
+        }
     }
 }

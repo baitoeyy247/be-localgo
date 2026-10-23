@@ -120,7 +120,7 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(corsOrigins.ToArray())
             .AllowAnyHeader()
             .AllowAnyMethod()
-            .WithExposedHeaders("X-Request-Id", "Server-Timing");
+            .WithExposedHeaders("X-Request-Id", "Server-Timing", "X-Total-Count");
     });
 });
 
