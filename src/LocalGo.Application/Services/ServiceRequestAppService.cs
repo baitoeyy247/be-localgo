@@ -274,6 +274,12 @@ public sealed class ServiceRequestAppService(
             return new BidFormAccess(false, "งานนี้ไม่เปิดรับข้อเสนอแล้ว", null);
         }
 
+        // R43 R-DB: a provider whose bid is closed (declined the appointment, or not chosen) cannot bid again.
+        if (canBid && !isSelected && myBids.Count > 0 && myBids.All(b => b.Status == BidStatus.Rejected))
+        {
+            return new BidFormAccess(false, await ClosedBidMessageAsync(provider.Id, request.Id, cancellationToken), null, "bid_closed");
+        }
+
         request.Bids = myBids;
         return new BidFormAccess(true, null, request);
     }
@@ -696,9 +702,25 @@ public sealed class ServiceRequestAppService(
             cancellationToken);
         var bidStats = await LoadProviderInboxBidStatsAsync(
             openRequests.Select(r => r.Id), provider.Id, cancellationToken);
+        // R43 R-DB: hide open jobs where this provider's bid is already closed (e.g. they declined the
+        // appointment and the request reopened). Other providers still see the job.
+        var openIdList = openRequests.Select(r => r.Id).ToList();
+        var closedForMe = openIdList.Count == 0
+            ? new HashSet<Guid>()
+            : (await db.Bids.AsNoTracking()
+                .Where(b => openIdList.Contains(b.ServiceRequestId)
+                    && b.ProviderId == provider.Id
+                    && b.Status == BidStatus.Rejected)
+                .Select(b => b.ServiceRequestId)
+                .ToListAsync(cancellationToken)).ToHashSet();
 
         foreach (var request in openRequests)
         {
+            if (closedForMe.Contains(request.Id))
+            {
+                continue;
+            }
+
             var distance = NearestCoverageDistance(coverageLinks, request);
             if (distance is null)
             {
@@ -956,6 +978,16 @@ public sealed class ServiceRequestAppService(
 
         return await MarketplaceCompiledQueries.GetRequestDetailAllBidsAsync(
             ctx, requestId, cancellationToken);
+    }
+
+    private async Task<string> ClosedBidMessageAsync(Guid providerId, Guid requestId, CancellationToken cancellationToken)
+    {
+        var declined = await db.Appointments.AsNoTracking().AnyAsync(
+            a => a.ServiceRequestId == requestId && a.ProviderId == providerId && a.Status == AppointmentStatus.Rejected,
+            cancellationToken);
+        return declined
+            ? "คุณปฏิเสธนัดหมายของงานนี้แล้ว จึงเสนอราคาใหม่ไม่ได้"
+            : "ข้อเสนอของคุณสำหรับงานนี้ถูกปิดแล้ว จึงเสนอราคาใหม่ไม่ได้";
     }
 
     private async Task<Dictionary<Guid, RequestBidStats>> LoadProviderInboxBidStatsAsync(

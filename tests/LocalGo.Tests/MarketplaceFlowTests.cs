@@ -398,4 +398,29 @@ public sealed class MarketplaceFlowTests
         Assert.Equal("ไม่ว่างช่วงนี้", adminRow.DeclineReason);
         Assert.Equal("โน้ตภายใน", adminRow.Note);
     }
+
+    [Fact]
+    public async Task R43_provider_who_rejected_appointment_no_longer_sees_job_as_open_and_cannot_bid()
+    {
+        await using var db = TestDbFactory.CreateContext();
+        var seed = await TestDbFactory.SeedMarketplaceJobAsync(db, withPendingAppointment: true);
+        var appointments = new AppointmentAppService(
+            db, TestDbFactory.NoopNotifications(), NullLogger<AppointmentAppService>.Instance);
+        await appointments.UpdateStatusAsync(
+            seed.ProviderUser.Id, seed.Appointment!.Id, AppointmentStatus.Rejected, "ไม่ว่าง", CancellationToken.None);
+
+        var sut = new ServiceRequestAppService(
+            db, TestDbFactory.NoopNotifications(), NullLogger<ServiceRequestAppService>.Instance);
+        var request = await db.ServiceRequests.AsNoTracking().SingleAsync(r => r.Id == seed.Request.Id);
+        var inbox = await sut.ListMatchingForProviderAsync(
+            seed.ProviderUser.Id, excludeSmokeTestData: false, includeOwnRequests: true, CancellationToken.None);
+        Assert.DoesNotContain(inbox.Items, x => x.Id == seed.Request.Id);
+
+        if (request.Status is ServiceRequestStatus.Open or ServiceRequestStatus.HasOffers)
+        {
+            var form = await sut.GetBidFormAsync(seed.ProviderUser.Id, seed.Request.Id, CancellationToken.None);
+            Assert.False(form.Allowed);
+            Assert.Equal("bid_closed", form.ReasonCode);
+        }
+    }
 }

@@ -461,7 +461,7 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
                 existing.Status = BidStatus.Submitted;
                 return;
             case BidStatus.Rejected:
-                throw new AppException("งานนี้ปฏิเสธข้อเสนอของคุณแล้ว ไม่สามารถส่งใหม่ได้", 409);
+                throw new AppException("ข้อเสนอของคุณสำหรับงานนี้ถูกปิดแล้ว (เคยปฏิเสธนัดหรือไม่ถูกเลือก) จึงเสนอราคาใหม่ไม่ได้", 409);
             case BidStatus.Selected:
                 throw new AppException("ข้อเสนอของคุณถูกเลือกแล้ว ไม่สามารถส่งใหม่ได้", 409);
             default:
