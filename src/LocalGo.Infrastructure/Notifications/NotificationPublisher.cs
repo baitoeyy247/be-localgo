@@ -77,7 +77,7 @@ public sealed class NotificationPublisher(
         {
             var payload = ParsePayload(log.PayloadJson);
             result = await sender.SendAsync(
-                new NotificationSendRequest(log.EventType, log.UserId, log.LineUserId, payload),
+                new NotificationSendRequest(log.EventType, log.UserId, log.LineUserId, payload, log.Id),
                 cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -108,6 +108,8 @@ public sealed class NotificationPublisher(
             case NotificationSendOutcome.Failed:
                 log.Status = NotificationStatus.Failed;
                 log.RetryCount += 1;
+                // R45 NR-4: permanent LINE rejections (4xx except 429) are not retried.
+                if (result.Permanent) log.RetryCount = Math.Max(log.RetryCount, MaxAttempts);
                 log.ErrorMessage = Truncate(result.ErrorMessage ?? "send failed", 1000);
                 Console.Out.WriteLine("[NOTIFY-ERR] " + JsonSerializer.Serialize(new
                 {

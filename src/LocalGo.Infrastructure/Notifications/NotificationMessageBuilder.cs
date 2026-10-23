@@ -105,7 +105,7 @@ public static class NotificationMessageBuilder
                 "บัญชี LocalGo ของคุณกลับมาใช้งานได้ตามปกติแล้ว",
                 null),
 
-            _ => ("LocalGo แจ้งเตือน", eventType, null),
+            _ => ("LocalGo แจ้งเตือน", "มีการอัปเดตใหม่ใน LocalGo", null),
         };
 
         if (liffPath is null
@@ -117,6 +117,9 @@ public static class NotificationMessageBuilder
                 db,
                 cancellationToken);
         }
+
+        // R45 NR-5: LINE rejects empty text components (HTTP 400) — always send a non-empty body.
+        if (string.IsNullOrWhiteSpace(body)) body = "แตะเพื่อดูรายละเอียดใน LocalGo";
 
         var liffUrl = !string.IsNullOrWhiteSpace(liffBaseUrl) && !string.IsNullOrWhiteSpace(liffPath)
             ? $"{liffBaseUrl}{liffPath}"
@@ -247,7 +250,7 @@ public static class NotificationMessageBuilder
         "Completed" => "เสร็จสิ้น",
         "Cancelled" => "ยกเลิกแล้ว",
         "Rejected" => "ผู้ให้บริการปฏิเสธ",
-        _ => status,
+        _ => "อัปเดตแล้ว",
     };
 
     // R42 NT-3: never show raw English enum values to users.
@@ -305,7 +308,7 @@ public static class NotificationMessageBuilder
         _ => $"สถานะ: {FormatAppointmentStatus(status)}",
     };
 
-    internal static string FormatScheduledAt(string scheduledAt)
+    public static string FormatScheduledAt(string scheduledAt)
     {
         if (!DateTime.TryParse(scheduledAt, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var utc))

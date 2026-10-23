@@ -13,12 +13,14 @@ public sealed record NotificationSendRequest(
     string EventType,
     Guid? RecipientUserId,
     string? LineUserId,
-    JsonElement? Payload);
+    JsonElement? Payload,
+    Guid? LogId = null);
 
 public sealed record NotificationSendResult(
     NotificationSendOutcome Outcome,
     string? ErrorMessage = null,
-    bool IncrementRetry = false);
+    bool IncrementRetry = false,
+    bool Permanent = false);
 
 public interface INotificationSender
 {

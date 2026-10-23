@@ -3,6 +3,7 @@ using System.Text.Json;
 using LocalGo.Application.Abstractions.Notifications;
 using LocalGo.Application.Abstractions.Persistence;
 using LocalGo.Infrastructure.Line;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -55,6 +56,20 @@ public sealed class LineNotificationSender(
                 "Dev login account cannot receive LINE push; sign in via LINE LIFF and add the OA as friend");
         }
 
+        // R45 NR-1: suspended users only receive the AccountSuspended notice.
+        if (request.RecipientUserId is { } rid
+            && request.EventType != NotificationEvents.AccountSuspended)
+        {
+            var status = await db.Users.AsNoTracking()
+                .Where(u => u.Id == rid)
+                .Select(u => (LocalGo.Domain.Enums.UserStatus?)u.Status)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (status == LocalGo.Domain.Enums.UserStatus.Suspended)
+            {
+                return new NotificationSendResult(NotificationSendOutcome.Skipped, "Recipient suspended");
+            }
+        }
+
         try
         {
             var (altText, message) = await NotificationMessageBuilder.BuildAsync(
@@ -77,11 +92,16 @@ public sealed class LineNotificationSender(
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.line.me/v2/bot/message/push");
             httpRequest.Headers.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.MessagingAccessToken);
+            // R45 NR-3: idempotent retries; LINE dedupes pushes with the same retry key (409 = already accepted).
+            if (request.LogId is { } logId)
+            {
+                httpRequest.Headers.TryAddWithoutValidation("X-Line-Retry-Key", logId.ToString());
+            }
             httpRequest.Content = JsonContent.Create(body, options: JsonOpts);
 
             var response = await client.SendAsync(httpRequest, cancellationToken);
 
-            if (response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.Conflict)
             {
                 logger.LogInformation(
                     "LINE push sent: {EventType} → {LineUserId}",
@@ -99,7 +119,8 @@ public sealed class LineNotificationSender(
             return new NotificationSendResult(
                 NotificationSendOutcome.Failed,
                 $"HTTP {(int)response.StatusCode}: {error}",
-                IncrementRetry: true);
+                IncrementRetry: true,
+                Permanent: IsPermanent((int)response.StatusCode));
         }
         catch (Exception ex)
         {
@@ -110,4 +131,6 @@ public sealed class LineNotificationSender(
                 IncrementRetry: true);
         }
     }
+
+    public static bool IsPermanent(int status) => status is >= 400 and < 500 and not 429 and not 408;
 }

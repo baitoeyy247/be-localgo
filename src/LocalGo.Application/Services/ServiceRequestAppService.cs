@@ -1172,9 +1172,9 @@ public sealed class ServiceRequestAppService(
 
             var owner = await db.Users.AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Id == ownerUserId, cancellationToken);
-            if (owner is null)
+            if (owner is null || owner.Status == LocalGo.Domain.Enums.UserStatus.Suspended)
             {
-                continue;
+                continue; // R45 NR-1: no new-job push to suspended owners.
             }
 
             var categoryName = await db.ServiceCategories.AsNoTracking()

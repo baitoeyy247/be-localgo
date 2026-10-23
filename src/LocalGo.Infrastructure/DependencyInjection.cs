@@ -50,7 +50,8 @@ public static class DependencyInjection
                 : sp.GetRequiredService<LineNotificationSender>();
         });
         services.AddScoped<INotificationPublisher, NotificationPublisher>();
-        services.AddHttpClient("line");
+        // R45 NR-2: bound LINE latency well under the 30s stale-pending retry window (no double send).
+        services.AddHttpClient("line", c => c.Timeout = TimeSpan.FromSeconds(10));
 
         services.AddSingleton<IBackgroundWork, BackgroundWork>();
         services.AddHostedService<DatabaseWarmupHostedService>();
