@@ -511,6 +511,10 @@ public sealed class AppointmentAppService(
                 status = appointment.Status.ToString(),
                 scheduledAt = appointment.ScheduledAt,
                 declineReason = appointment.DeclineReason,
+                // R42 N-C3: who acted, so templates can say "ลูกค้า/ผู้ให้บริการยกเลิกนัดหมาย".
+                actorRole = actorUserId == request.RequesterUserId
+                    ? "requester"
+                    : provider?.OwnerUser?.Id == actorUserId ? "provider" : "admin",
             };
 
             if (requester is not null

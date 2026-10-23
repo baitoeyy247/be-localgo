@@ -18,6 +18,9 @@ public static class NotificationMessageBuilder
     {
         var ctx = await ResolveServiceContextAsync(payload, db, cancellationToken);
         var serviceBlock = FormatServiceContext(ctx);
+        var actorRole = GetStr(payload, "actorRole");
+        var toProvider = eventType is NotificationEvents.AppointmentCreated or NotificationEvents.AppointmentUpdated
+            && await IsProviderRecipientAsync(payload, recipientUserId, actorRole, db, cancellationToken);
 
         var (title, body, liffPath) = eventType switch
         {
@@ -42,16 +45,21 @@ public static class NotificationMessageBuilder
                     ? "/provider/requests"
                     : $"/provider/requests/{GetStr(payload, "requestId")}"),
 
-            NotificationEvents.AppointmentCreated => (
-                "สร้างนัดหมายแล้ว",
-                JoinLines(serviceBlock, $"สถานะ: {FormatAppointmentStatus(GetStr(payload, "status"))}"),
-                null),
+            NotificationEvents.AppointmentCreated => toProvider
+                ? (
+                    "มีนัดหมายใหม่จากลูกค้า กรุณายืนยัน",
+                    JoinLines(serviceBlock, FormatScheduledAt(GetStr(payload, "scheduledAt"))),
+                    null)
+                : (
+                    "สร้างนัดหมายแล้ว",
+                    JoinLines(serviceBlock, $"สถานะ: {FormatAppointmentStatus(GetStr(payload, "status"))}"),
+                    null),
 
             NotificationEvents.AppointmentUpdated => (
-                AppointmentUpdatedTitle(GetStr(payload, "status")),
+                AppointmentUpdatedTitle(GetStr(payload, "status"), toProvider, actorRole),
                 JoinLines(
                     serviceBlock,
-                    AppointmentUpdatedDetail(GetStr(payload, "status"), GetStr(payload, "declineReason")),
+                    AppointmentUpdatedDetail(GetStr(payload, "status"), GetStr(payload, "declineReason"), toProvider),
                     FormatScheduledAt(GetStr(payload, "scheduledAt"))),
                 null),
 
@@ -73,8 +81,8 @@ public static class NotificationMessageBuilder
             NotificationEvents.ReviewReceived => (
                 "คุณได้รับรีวิวใหม่",
                 string.IsNullOrWhiteSpace(serviceBlock)
-                    ? $"{GetStr(payload, "reviewType")} · {GetStr(payload, "rating")} ดาว"
-                    : JoinLines(serviceBlock, $"{GetStr(payload, "reviewType")} · {GetStr(payload, "rating")} ดาว"),
+                    ? $"{FormatReviewType(GetStr(payload, "reviewType"))} · {GetStr(payload, "rating")} ดาว"
+                    : JoinLines(serviceBlock, $"{FormatReviewType(GetStr(payload, "reviewType"))} · {GetStr(payload, "rating")} ดาว"),
                 "/provider/profile"),
 
             NotificationEvents.BidUpdated => (
@@ -242,9 +250,39 @@ public static class NotificationMessageBuilder
         _ => status,
     };
 
-    private static string AppointmentUpdatedTitle(string status) => status switch
+    // R42 NT-3: never show raw English enum values to users.
+    internal static string FormatReviewType(string reviewType) => reviewType switch
     {
+        "Verified" or "0" => "ยืนยันแล้ว",
+        "Public" or "1" => "รีวิวทั่วไป",
+        _ => "รีวิว",
+    };
+
+    private static async Task<bool> IsProviderRecipientAsync(
+        JsonElement? payload, Guid? recipientUserId, string actorRole, ILocalGoDbContext db, CancellationToken ct)
+    {
+        if (recipientUserId is not null && Guid.TryParse(GetStr(payload, "requestId"), out var requestId))
+        {
+            var requesterUserId = await db.ServiceRequests.AsNoTracking()
+                .Where(r => r.Id == requestId)
+                .Select(r => (Guid?)r.RequesterUserId)
+                .FirstOrDefaultAsync(ct);
+            if (requesterUserId is not null)
+            {
+                return requesterUserId != recipientUserId;
+            }
+        }
+
+        return actorRole == "requester";
+    }
+
+    internal static string AppointmentUpdatedTitle(string status, bool toProvider = false, string actorRole = "") => status switch
+    {
+        "Pending" when toProvider => "ลูกค้าขอเลื่อนนัดหมาย กรุณายืนยันวันเวลาใหม่",
         "Pending" => "นัดหมายถูกเลื่อน รอผู้ให้บริการยืนยัน",
+        "Cancelled" when actorRole == "requester" => "ลูกค้ายกเลิกนัดหมาย",
+        "Cancelled" when actorRole == "provider" => "ผู้ให้บริการยกเลิกนัดหมาย",
+        "Cancelled" when actorRole == "admin" => "ผู้ดูแลระบบยกเลิกนัดหมาย",
         "Confirmed" => "ผู้ให้บริการยืนยันนัดหมายแล้ว",
         "InProgress" => "ผู้ให้บริการเริ่มงานแล้ว",
         "Completed" => "งานเสร็จสิ้นแล้ว",
@@ -253,8 +291,9 @@ public static class NotificationMessageBuilder
         _ => "อัปเดตสถานะนัดหมาย",
     };
 
-    private static string AppointmentUpdatedDetail(string status, string declineReason) => status switch
+    private static string AppointmentUpdatedDetail(string status, string declineReason, bool toProvider = false) => status switch
     {
+        "Pending" when toProvider => "ตรวจสอบวันเวลาใหม่แล้วกดยืนยันนัด",
         "Pending" => "มีการเปลี่ยนวันเวลานัด กรุณาตรวจสอบและยืนยันอีกครั้ง",
         "Confirmed" => "นัดหมายได้รับการยืนยันแล้ว",
         "InProgress" => "งานกำลังดำเนินการ",
