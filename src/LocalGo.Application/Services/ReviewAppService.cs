@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using LocalGo.Application.Abstractions.Notifications;
 using LocalGo.Application.Abstractions.Persistence;
 using LocalGo.Application.Common;
@@ -8,7 +9,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LocalGo.Application.Services;
 
-public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublisher notifications)
+public sealed class ReviewAppService(
+    ILocalGoDbContext db,
+    INotificationPublisher notifications,
+    Microsoft.Extensions.Logging.ILogger<ReviewAppService>? log = null)
 {
     public async Task<ReviewCreatedDto> CreateAsync(Guid userId, Guid providerId, CreateReviewRequest request, CancellationToken cancellationToken)
     {
@@ -90,25 +94,33 @@ public sealed class ReviewAppService(ILocalGoDbContext db, INotificationPublishe
         var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == provider.OwnerUserId, CancellationToken.None);
         if (owner is not null && NotificationRecipients.ShouldNotify(owner.Id, userId))
         {
-            await notifications.EnqueueAsync(
-                NotificationEvents.ReviewReceived,
-                owner.Id,
-                owner.LineUserId,
-                new
-                {
-                    providerId = effectiveProviderId,
-                    rating = review.Rating,
-                    reviewType = review.ReviewType.ToString(),
-                    serviceRequestId = review.ServiceRequestId,
-                    requestId = review.ServiceRequestId,
-                    appointmentId = review.ServiceRequestId is null
-                        ? (Guid?)null
-                        : await db.Appointments.AsNoTracking()
-                            .Where(a => a.ServiceRequestId == review.ServiceRequestId)
-                            .Select(a => (Guid?)a.Id)
-                            .FirstOrDefaultAsync(CancellationToken.None),
-                },
-                CancellationToken.None);
+            // R46 D5: the review is already committed — a notify failure must not turn it into a 500.
+            try
+            {
+                await notifications.EnqueueAsync(
+                    NotificationEvents.ReviewReceived,
+                    owner.Id,
+                    owner.LineUserId,
+                    new
+                    {
+                        providerId = effectiveProviderId,
+                        rating = review.Rating,
+                        reviewType = review.ReviewType.ToString(),
+                        serviceRequestId = review.ServiceRequestId,
+                        requestId = review.ServiceRequestId,
+                        appointmentId = review.ServiceRequestId is null
+                            ? (Guid?)null
+                            : await db.Appointments.AsNoTracking()
+                                .Where(a => a.ServiceRequestId == review.ServiceRequestId)
+                                .Select(a => (Guid?)a.Id)
+                                .FirstOrDefaultAsync(CancellationToken.None),
+                    },
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                log?.LogWarning(ex, "Review {ReviewId} saved but notification enqueue failed", review.Id);
+            }
         }
 
         return new ReviewCreatedDto(

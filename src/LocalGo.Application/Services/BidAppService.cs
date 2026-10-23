@@ -38,6 +38,11 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
         }
 
         var now = DateTime.UtcNow;
+        // R46 D8: remember what existed before, so a re-submit of identical values does not re-announce "new bid".
+        var prior = await db.Bids.AsNoTracking()
+            .Where(b => b.ServiceRequestId == requestId && b.ProviderId == provider.Id)
+            .Select(b => new { b.Id, b.Status, b.PriceText, b.Amount, b.Description, b.AvailableAt })
+            .FirstOrDefaultAsync(cancellationToken);
         var bid = await ResolveBidForSubmitAsync(provider.Id, requestId, request, price, now, cancellationToken);
 
         MarkRequestAfterBid(serviceRequest, now);
@@ -53,6 +58,24 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
             bid = await ResolveBidForSubmitAsync(provider.Id, requestId, request, price, now, cancellationToken);
             MarkRequestAfterBid(serviceRequest, now);
             await db.SaveChangesAsync(cancellationToken);
+        }
+
+        if (prior is { Status: BidStatus.Submitted })
+        {
+            // R46 D8: an already-submitted bid is never "new"; changes are announced as BidUpdated, no-ops not at all.
+            var changed = prior.PriceText != bid.PriceText || prior.Amount != bid.Amount
+                || prior.Description != bid.Description || prior.AvailableAt != bid.AvailableAt;
+            if (changed)
+            {
+                await NotifyRequesterAboutBidAsync(NotificationEvents.BidUpdated, userId, provider.Name, bid, CancellationToken.None, prior.Amount, prior.PriceText);
+            }
+
+            return bid;
+        }
+
+        if (await RecentlyAnnouncedAsync(bid.Id, serviceRequest.RequesterUserId))
+        {
+            return bid; // R46 D8: double-tap / race on re-submit after withdraw — announce once.
         }
 
         var requester = await db.Users.AsNoTracking()
@@ -237,10 +260,63 @@ public sealed class BidAppService(ILocalGoDbContext db, INotificationPublisher n
 
         var appointment = await db.Appointments
             .FirstOrDefaultAsync(a => a.ServiceRequestId == requestId, cancellationToken);
+        var previousAppointmentStatus = appointment?.Status;
         CancelAppointmentForClearSelection(appointment);
 
+        var removedProviderId = serviceRequest.SelectedProviderId;
         RevertBidSelection(serviceRequest);
         await db.SaveChangesAsync(cancellationToken);
+
+        // R46 D3: tell the de-selected provider (post-commit, best-effort) so they don't turn up for a cancelled job.
+        if (removedProviderId is { } providerId)
+        {
+            var owner = await db.Providers.AsNoTracking()
+                .Where(p => p.Id == providerId)
+                .Select(p => new { p.OwnerUser.Id, p.OwnerUser.LineUserId })
+                .FirstOrDefaultAsync(CancellationToken.None);
+            if (owner is not null)
+            {
+                var categoryName = await db.ServiceCategories.AsNoTracking()
+                    .Where(c => c.Id == serviceRequest.CategoryId)
+                    .Select(c => c.Name)
+                    .FirstOrDefaultAsync(CancellationToken.None);
+                await NotificationEnqueue.TryExcludingActorAsync(
+                    logger,
+                    notifications,
+                    NotificationEvents.SelectionCleared,
+                    owner.Id,
+                    userId,
+                    owner.LineUserId,
+                    new
+                    {
+                        requestId,
+                        title = serviceRequest.Title,
+                        categoryId = serviceRequest.CategoryId,
+                        categoryName,
+                        appointmentId = appointment?.Id,
+                        appointmentCancelled = previousAppointmentStatus == AppointmentStatus.Pending,
+                        actorRole = "requester",
+                    },
+                    CancellationToken.None,
+                    "Selection cleared but notification enqueue failed. RequestId={RequestId} ProviderId={ProviderId}",
+                    requestId,
+                    providerId);
+            }
+        }
+    }
+
+    /// <summary>R46 D8: a NewBidReceived for this bid was already queued/sent within the last minute.</summary>
+    internal async Task<bool> RecentlyAnnouncedAsync(Guid bidId, Guid requesterUserId)
+    {
+        var since = DateTime.UtcNow.AddSeconds(-60);
+        var key = bidId.ToString();
+        return await db.NotificationLogs.AsNoTracking().AnyAsync(
+            n => n.EventType == NotificationEvents.NewBidReceived
+                && n.UserId == requesterUserId
+                && n.CreatedAt >= since
+                && n.PayloadJson != null
+                && n.PayloadJson.Contains(key),
+            CancellationToken.None);
     }
 
     /// <summary>Withdraws a submitted bid owned by the current provider.</summary>

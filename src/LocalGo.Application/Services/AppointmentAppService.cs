@@ -336,12 +336,27 @@ public sealed class AppointmentAppService(
             throw new AppException("Appointment is already in progress or completed.", 409);
         }
 
+        // R46 D7: only notify when something the other party cares about actually changed.
+        var beforeScheduledAt = existing.ScheduledAt;
+        var beforeAddress = existing.AddressText;
+        var beforeNote = existing.Note;
+        var beforeLocation = existing.Location;
         ApplyAppointmentFields(existing, request, merge: true);
+        var changed = beforeScheduledAt != existing.ScheduledAt
+            || !string.Equals(beforeAddress, existing.AddressText, StringComparison.Ordinal)
+            || !string.Equals(beforeNote, existing.Note, StringComparison.Ordinal)
+            || !LocationEquals(beforeLocation, existing.Location);
+        if (!changed)
+        {
+            return existing;
+        }
+
         existing.UpdatedAt = now;
         MarkRequestScheduled(serviceRequest);
         await db.SaveChangesAsync(cancellationToken);
+        // R46 D7: changeKind=edited so an edited Confirmed appointment gets an "edited" title, not "confirmed".
         await NotifyOtherPartyAsync(
-            actorUserId, serviceRequest, existing, NotificationEvents.AppointmentUpdated, cancellationToken);
+            actorUserId, serviceRequest, existing, NotificationEvents.AppointmentUpdated, cancellationToken, changeKind: "edited");
         return existing;
     }
 
@@ -370,6 +385,9 @@ public sealed class AppointmentAppService(
 
         TryApplyLocation(appointment, request);
     }
+
+    private static bool LocationEquals(NetTopologySuite.Geometries.Point? a, NetTopologySuite.Geometries.Point? b)
+        => a is null ? b is null : b is not null && a.X == b.X && a.Y == b.Y;
 
     private static void TryApplyLocation(Appointment appointment, CreateAppointmentRequest request)
     {
@@ -484,7 +502,8 @@ public sealed class AppointmentAppService(
         ServiceRequest request,
         Appointment appointment,
         string eventType,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? changeKind = null)
     {
         // N-1: notify runs post-commit; never bound to the HTTP request token (client abort).
         cancellationToken = CancellationToken.None;
@@ -515,6 +534,7 @@ public sealed class AppointmentAppService(
                 actorRole = actorUserId == request.RequesterUserId
                     ? "requester"
                     : provider?.OwnerUser?.Id == actorUserId ? "provider" : "admin",
+                changeKind,
             };
 
             if (requester is not null

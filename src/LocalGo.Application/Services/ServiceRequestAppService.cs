@@ -422,7 +422,7 @@ public sealed class ServiceRequestAppService(
             ?? throw new AppException("Request not found.", 404);
         await MarketplaceAccess.EnsureServiceRequestParticipantAsync(db, userId, entity, cancellationToken);
         await EnsureAppointmentWindowAsync(entity.Id, cancellationToken);
-        await MoveActiveAppointmentAsync(
+        var moved = await MoveActiveAppointmentAsync(
             userId,
             entity.Id,
             AppointmentStatus.Confirmed,
@@ -432,6 +432,7 @@ public sealed class ServiceRequestAppService(
         entity.Status = ServiceRequestStatus.InProgress;
         ProgressHelper.Touch(entity);
         await db.SaveChangesAsync(cancellationToken);
+        await NotifyRequesterAppointmentMovedAsync(userId, entity, moved);
     }
 
     /// <summary>Marks an in-progress job completed. Provider only when an appointment exists.</summary>
@@ -441,7 +442,7 @@ public sealed class ServiceRequestAppService(
             ?? throw new AppException("Request not found.", 404);
         await MarketplaceAccess.EnsureServiceRequestParticipantAsync(db, userId, entity, cancellationToken);
         await EnsureAppointmentWindowAsync(entity.Id, cancellationToken);
-        await MoveActiveAppointmentAsync(
+        var moved = await MoveActiveAppointmentAsync(
             userId,
             entity.Id,
             AppointmentStatus.InProgress,
@@ -451,6 +452,7 @@ public sealed class ServiceRequestAppService(
         entity.Status = ServiceRequestStatus.Completed;
         ProgressHelper.Touch(entity);
         await db.SaveChangesAsync(cancellationToken);
+        await NotifyRequesterAppointmentMovedAsync(userId, entity, moved);
     }
 
     private async Task EnsureAppointmentWindowAsync(Guid requestId, CancellationToken cancellationToken)
@@ -468,7 +470,48 @@ public sealed class ServiceRequestAppService(
                 && db.Providers.Any(p => p.Id == a.ProviderId && p.OwnerUserId == userId),
             cancellationToken);
 
-    private async Task MoveActiveAppointmentAsync(
+    /// <summary>
+    /// R46 D4: start/complete via /service-requests must notify the requester exactly like PATCH /appointments
+    /// (AppointmentUpdated, post-commit, once — nothing when the appointment was already in that status).
+    /// </summary>
+    private async Task NotifyRequesterAppointmentMovedAsync(Guid actorUserId, ServiceRequest request, Appointment? moved)
+    {
+        if (moved is null) return;
+        var requester = await db.Users.AsNoTracking()
+            .Where(u => u.Id == request.RequesterUserId)
+            .Select(u => new { u.Id, u.LineUserId })
+            .FirstOrDefaultAsync(CancellationToken.None);
+        if (requester is null) return;
+        var categoryName = await db.ServiceCategories.AsNoTracking()
+            .Where(c => c.Id == request.CategoryId)
+            .Select(c => c.Name)
+            .FirstOrDefaultAsync(CancellationToken.None);
+        await NotificationEnqueue.TryExcludingActorAsync(
+            logger,
+            notifications,
+            NotificationEvents.AppointmentUpdated,
+            requester.Id,
+            actorUserId,
+            requester.LineUserId,
+            new
+            {
+                requestId = request.Id,
+                appointmentId = moved.Id,
+                title = request.Title,
+                categoryId = request.CategoryId,
+                categoryName,
+                status = moved.Status.ToString(),
+                scheduledAt = moved.ScheduledAt,
+                declineReason = moved.DeclineReason,
+                actorRole = "provider",
+            },
+            CancellationToken.None,
+            "Appointment moved but notification enqueue failed. RequestId={RequestId} AppointmentId={AppointmentId}",
+            request.Id,
+            moved.Id);
+    }
+
+    private async Task<Appointment?> MoveActiveAppointmentAsync(
         Guid userId,
         Guid requestId,
         AppointmentStatus requiredCurrent,
@@ -482,7 +525,7 @@ public sealed class ServiceRequestAppService(
                 cancellationToken);
         if (appointment is null || appointment.Status == next)
         {
-            return;
+            return null;
         }
 
         if (appointment.Status != requiredCurrent)
@@ -500,6 +543,7 @@ public sealed class ServiceRequestAppService(
 
         appointment.Status = next;
         appointment.UpdatedAt = DateTime.UtcNow;
+        return appointment;
     }
 
     public async Task ExpireStaleAsync(CancellationToken cancellationToken)
@@ -512,32 +556,96 @@ public sealed class ServiceRequestAppService(
                 && r.LastProgressAt <= threshold)
             .ToListAsync(cancellationToken);
 
+        if (stale.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
         foreach (var request in stale)
         {
             request.Status = ServiceRequestStatus.Expired;
-            request.ExpiresAt = DateTime.UtcNow;
-            request.UpdatedAt = DateTime.UtcNow;
-            var owner = await db.Users.AsNoTracking()
-                .FirstOrDefaultAsync(u => u.Id == request.RequesterUserId, cancellationToken);
-            if (owner is not null)
-            {
-                var categoryName = await db.ServiceCategories.AsNoTracking()
-                    .Where(c => c.Id == request.CategoryId)
-                    .Select(c => c.Name)
-                    .FirstAsync(cancellationToken);
-
-                await notifications.EnqueueAsync(
-                    NotificationEvents.RequestExpired,
-                    owner.Id,
-                    owner.LineUserId,
-                    new { requestId = request.Id, title = request.Title, categoryId = request.CategoryId, categoryName },
-                    cancellationToken);
-            }
+            request.ExpiresAt = now;
+            request.UpdatedAt = now;
         }
 
-        if (stale.Count > 0)
+        // R46 D5: commit the expiry first; notifications are best-effort per row afterwards.
+        await db.SaveChangesAsync(cancellationToken);
+
+        foreach (var request in stale)
         {
-            await db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await NotifyExpiredAsync(request);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Request {RequestId} expired but notification failed", request.Id);
+            }
+        }
+    }
+
+    /// <summary>R46 D5: RequestExpired to the requester, the selected provider and every Submitted bidder (dedup per user).</summary>
+    private async Task NotifyExpiredAsync(ServiceRequest request)
+    {
+        var ct = CancellationToken.None;
+        var categoryName = await db.ServiceCategories.AsNoTracking()
+            .Where(c => c.Id == request.CategoryId)
+            .Select(c => c.Name)
+            .FirstOrDefaultAsync(ct);
+        var notified = new HashSet<Guid>();
+
+        var owner = await db.Users.AsNoTracking()
+            .Where(u => u.Id == request.RequesterUserId)
+            .Select(u => new { u.Id, u.LineUserId })
+            .FirstOrDefaultAsync(ct);
+        if (owner is not null && notified.Add(owner.Id))
+        {
+            await NotificationEnqueue.TryAsync(
+                logger,
+                notifications,
+                NotificationEvents.RequestExpired,
+                owner.Id,
+                owner.LineUserId,
+                new { requestId = request.Id, title = request.Title, categoryId = request.CategoryId, categoryName, audience = "requester" },
+                ct,
+                "Request expired but notification enqueue failed. RequestId={RequestId} RecipientId={RecipientId}",
+                request.Id,
+                owner.Id);
+        }
+
+        var providerIds = await db.Bids.AsNoTracking()
+            .Where(b => b.ServiceRequestId == request.Id
+                && (b.Status == BidStatus.Submitted || b.Status == BidStatus.Selected))
+            .Select(b => b.ProviderId)
+            .ToListAsync(ct);
+        if (request.SelectedProviderId is { } selectedId)
+        {
+            providerIds.Add(selectedId);
+        }
+
+        var recipients = await db.Providers.AsNoTracking()
+            .Where(p => providerIds.Contains(p.Id))
+            .Select(p => new { p.OwnerUser.Id, p.OwnerUser.LineUserId })
+            .ToListAsync(ct);
+        foreach (var r in recipients)
+        {
+            if (!notified.Add(r.Id))
+            {
+                continue;
+            }
+
+            await NotificationEnqueue.TryAsync(
+                logger,
+                notifications,
+                NotificationEvents.RequestExpired,
+                r.Id,
+                r.LineUserId,
+                new { requestId = request.Id, title = request.Title, categoryId = request.CategoryId, categoryName, audience = "provider" },
+                ct,
+                "Request expired but provider notification enqueue failed. RequestId={RequestId} RecipientId={RecipientId}",
+                request.Id,
+                r.Id);
         }
     }
 
@@ -568,7 +676,7 @@ public sealed class ServiceRequestAppService(
                      && n.UserId == request.RequesterUserId
                      && n.PayloadJson != null
                      && n.PayloadJson.Contains(requestIdStr)
-                     && (n.Status == NotificationStatus.Sent || n.Status == NotificationStatus.Pending),
+                     && (n.Status == NotificationStatus.Sent || n.Status == NotificationStatus.Pending || n.Status == NotificationStatus.Sending),
                 cancellationToken);
 
             if (alreadyNotified)
@@ -589,12 +697,17 @@ public sealed class ServiceRequestAppService(
                 .Select(c => c.Name)
                 .FirstAsync(cancellationToken);
 
-            await notifications.EnqueueAsync(
+            // R46 D5: one failing row must not stop the batch.
+            await NotificationEnqueue.TryAsync(
+                logger,
+                notifications,
                 NotificationEvents.RequestExpiringSoon,
                 owner.Id,
                 owner.LineUserId,
                 new { requestId = request.Id, title = request.Title, categoryId = request.CategoryId, categoryName, daysRemaining },
-                cancellationToken);
+                cancellationToken,
+                "Expiring-soon notification enqueue failed. RequestId={RequestId}",
+                request.Id);
         }
     }
 
@@ -1172,9 +1285,9 @@ public sealed class ServiceRequestAppService(
 
             var owner = await db.Users.AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Id == ownerUserId, cancellationToken);
-            if (owner is null || owner.Status == LocalGo.Domain.Enums.UserStatus.Suspended)
+            if (owner is null || !NotificationRecipientFilter.IsReachable(owner.Status))
             {
-                continue; // R45 NR-1: no new-job push to suspended owners.
+                continue; // R45 NR-1 / R46 D2: no new-job push to suspended or deleted owners.
             }
 
             var categoryName = await db.ServiceCategories.AsNoTracking()

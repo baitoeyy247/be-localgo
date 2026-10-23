@@ -16,4 +16,6 @@ public static class NotificationEvents
     public const string BidWithdrawn = "BidWithdrawn";
     public const string AccountSuspended = "AccountSuspended";
     public const string AccountReactivated = "AccountReactivated";
+    /// <summary>R46 D3: requester cleared the selection; sent to the de-selected provider.</summary>
+    public const string SelectionCleared = "SelectionCleared";
 }

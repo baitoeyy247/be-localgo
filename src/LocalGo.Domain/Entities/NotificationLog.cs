@@ -14,6 +14,8 @@ public sealed class NotificationLog : Entity
     public string? ErrorMessage { get; set; }
     public int RetryCount { get; set; }
     public DateTime CreatedAt { get; set; }
+    /// <summary>R46 D6: when a dispatcher claimed the row (Status=Sending).</summary>
+    public DateTime? ClaimedAt { get; set; }
 
     public User? User { get; set; }
 }

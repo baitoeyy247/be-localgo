@@ -56,18 +56,12 @@ public sealed class LineNotificationSender(
                 "Dev login account cannot receive LINE push; sign in via LINE LIFF and add the OA as friend");
         }
 
-        // R45 NR-1: suspended users only receive the AccountSuspended notice.
-        if (request.RecipientUserId is { } rid
-            && request.EventType != NotificationEvents.AccountSuspended)
+        // R45 NR-1 / R46 D2: only Active recipients (AccountSuspended still reaches suspended users).
+        var blocked = await LocalGo.Application.Common.NotificationRecipientFilter.BlockReasonAsync(
+            db, request.RecipientUserId, request.EventType, cancellationToken);
+        if (blocked is not null)
         {
-            var status = await db.Users.AsNoTracking()
-                .Where(u => u.Id == rid)
-                .Select(u => (LocalGo.Domain.Enums.UserStatus?)u.Status)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (status == LocalGo.Domain.Enums.UserStatus.Suspended)
-            {
-                return new NotificationSendResult(NotificationSendOutcome.Skipped, "Recipient suspended");
-            }
+            return new NotificationSendResult(NotificationSendOutcome.Skipped, blocked);
         }
 
         try

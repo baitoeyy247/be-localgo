@@ -13,11 +13,14 @@ public sealed class NotificationPublisher(
     ILocalGoDbContext db,
     INotificationSender sender,
     ILogger<NotificationPublisher> logger,
-    LocalGo.Application.Common.IBackgroundWork? background = null) : INotificationPublisher
+    LocalGo.Application.Common.IBackgroundWork? background = null,
+    IServiceScopeFactory? scopes = null) : INotificationPublisher
 {
     internal const int MaxAttempts = 5;
     /// <summary>Pending rows older than this are treated as stuck (process died / exception mid-send).</summary>
     internal static readonly TimeSpan StalePendingAfter = TimeSpan.FromSeconds(30);
+    /// <summary>R46 D6: a Sending claim older than this is considered abandoned (crash mid-send).</summary>
+    internal static readonly TimeSpan StaleSendingAfter = TimeSpan.FromSeconds(60);
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
     public async Task EnqueueAsync(
@@ -40,14 +43,19 @@ public sealed class NotificationPublisher(
 
         var t0 = LocalGo.Application.Common.ServerTiming.Start();
         var save0 = LocalGo.Application.Common.ServerTiming.Current?.SaveMs ?? 0;
-        db.NotificationLogs.Add(log);
+
+        // R46 D6: write the outbox row through its own scope/DbContext so the caller's pending
+        // (unsaved) changes are never flushed as a side effect of notifying.
+        using var scope = scopes?.CreateScope();
+        var outboxDb = scope?.ServiceProvider.GetRequiredService<ILocalGoDbContext>() ?? db;
+        outboxDb.NotificationLogs.Add(log);
         // N-1: the outbox row must be written even if the caller's request was aborted.
-        await db.SaveChangesAsync(CancellationToken.None);
+        await outboxDb.SaveChangesAsync(CancellationToken.None);
 
         if (background is null)
         {
             // Dispatch must not depend on the caller's request lifetime (client abort would leave Pending).
-            await TrySendAsync(log, CancellationToken.None);
+            await DispatchCoreAsync(outboxDb, log.Id, CancellationToken.None);
         }
         else
         {
@@ -63,22 +71,28 @@ public sealed class NotificationPublisher(
         LocalGo.Application.Common.ServerTiming.AddNotify(elapsed > TimeSpan.Zero ? elapsed : TimeSpan.Zero);
     }
 
-    /// <summary>P-1: send one outbox row if it is still Pending (retry job may have claimed it).</summary>
-    public async Task DispatchAsync(Guid logId, CancellationToken cancellationToken = default)
+    /// <summary>P-1 / R46 D6: send one outbox row only if this caller wins the atomic Pending→Sending claim.</summary>
+    public Task DispatchAsync(Guid logId, CancellationToken cancellationToken = default)
+        => DispatchCoreAsync(db, logId, cancellationToken);
+
+    private async Task DispatchCoreAsync(ILocalGoDbContext d, Guid logId, CancellationToken cancellationToken)
     {
-        var log = await db.NotificationLogs.FirstOrDefaultAsync(n => n.Id == logId, cancellationToken);
+        var log = await d.NotificationLogs.FirstOrDefaultAsync(n => n.Id == logId, cancellationToken);
         if (log is null || log.Status != NotificationStatus.Pending) return;
-        await TrySendAsync(log, CancellationToken.None);
+        if (!await TryClaimAsync(d, log, cancellationToken)) return;
+        await TrySendAsync(d, log, CancellationToken.None);
     }
 
     public async Task RetryPendingAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
         var staleBefore = now - StalePendingAfter;
+        var staleSendingBefore = now - StaleSendingAfter;
         var candidates = await db.NotificationLogs
             .Where(n => n.RetryCount < MaxAttempts
                 && (n.Status == NotificationStatus.Failed
-                    || (n.Status == NotificationStatus.Pending && n.CreatedAt < staleBefore)))
+                    || (n.Status == NotificationStatus.Pending && n.CreatedAt < staleBefore)
+                    || (n.Status == NotificationStatus.Sending && n.ClaimedAt < staleSendingBefore)))
             .OrderBy(n => n.CreatedAt)
             .Take(100)
             .ToListAsync(cancellationToken);
@@ -86,8 +100,49 @@ public sealed class NotificationPublisher(
         foreach (var log in candidates)
         {
             if (log.Status == NotificationStatus.Failed && now < NextAttemptAt(log)) continue;
-            await TrySendAsync(log, cancellationToken);
+            if (!await TryClaimAsync(db, log, cancellationToken)) continue;
+            await TrySendAsync(db, log, cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// R46 D6: atomic claim. On a relational DB this is
+    /// UPDATE notification_logs SET status=Sending, claimed_at=now WHERE id=@id AND status=@expected [AND claimed_at stale]
+    /// and only the caller that affected exactly one row sends. Non-relational providers (unit tests) fall back
+    /// to a tracked compare-and-set.
+    /// </summary>
+    internal async Task<bool> TryClaimAsync(ILocalGoDbContext d, NotificationLog log, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var expected = log.Status;
+        var staleSendingBefore = now - StaleSendingAfter;
+        if (expected == NotificationStatus.Sending && log.ClaimedAt >= staleSendingBefore) return false;
+
+        if (d is DbContext ctx && ctx.Database.IsRelational())
+        {
+            var id = log.Id;
+            var rows = await d.NotificationLogs
+                .Where(n => n.Id == id
+                    && n.Status == expected
+                    && (expected != NotificationStatus.Sending || n.ClaimedAt < staleSendingBefore))
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(n => n.Status, NotificationStatus.Sending)
+                          .SetProperty(n => n.ClaimedAt, (DateTime?)now),
+                    CancellationToken.None);
+            if (rows != 1) return false;
+            log.Status = NotificationStatus.Sending;
+            log.ClaimedAt = now;
+            var entry = ctx.Entry(log);
+            entry.Property(n => n.Status).OriginalValue = NotificationStatus.Sending;
+            entry.Property(n => n.ClaimedAt).OriginalValue = now;
+            return true;
+        }
+
+        if (log.Status != expected) return false;
+        log.Status = NotificationStatus.Sending;
+        log.ClaimedAt = now;
+        await d.SaveChangesAsync(CancellationToken.None);
+        return true;
     }
 
     /// <summary>Exponential backoff from CreatedAt: 15s, 30s, 60s, 120s ... (cumulative).</summary>
@@ -97,13 +152,18 @@ public sealed class NotificationPublisher(
         return log.CreatedAt.AddSeconds(seconds);
     }
 
-    private async Task TrySendAsync(NotificationLog log, CancellationToken cancellationToken)
+    private async Task TrySendAsync(ILocalGoDbContext d, NotificationLog log, CancellationToken cancellationToken)
     {
         NotificationSendResult result;
         try
         {
+            // R46 D1/D2: recipient gate for every sender mode (console and LINE).
+            var blocked = await LocalGo.Application.Common.NotificationRecipientFilter.BlockReasonAsync(
+                d, log.UserId, log.EventType, CancellationToken.None);
             var payload = ParsePayload(log.PayloadJson);
-            result = await sender.SendAsync(
+            result = blocked is not null
+                ? new NotificationSendResult(NotificationSendOutcome.Skipped, blocked)
+                : await sender.SendAsync(
                 new NotificationSendRequest(log.EventType, log.UserId, log.LineUserId, payload, log.Id),
                 cancellationToken);
         }
@@ -151,7 +211,7 @@ public sealed class NotificationPublisher(
                 break;
         }
 
-        await db.SaveChangesAsync(CancellationToken.None);
+        await d.SaveChangesAsync(CancellationToken.None);
     }
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];

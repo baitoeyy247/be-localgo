@@ -95,6 +95,8 @@ public enum NotificationStatus
     Sent = 1,
     Failed = 2,
     Skipped = 3,
+    /// <summary>R46 D6: claimed by a dispatcher; stale claims (>60s) are re-picked by the retry job.</summary>
+    Sending = 4,
 }
 
 public enum ReportTargetType

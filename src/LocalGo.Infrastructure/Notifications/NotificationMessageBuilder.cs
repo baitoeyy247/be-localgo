@@ -55,6 +55,14 @@ public static class NotificationMessageBuilder
                     JoinLines(serviceBlock, $"สถานะ: {FormatAppointmentStatus(GetStr(payload, "status"))}"),
                     null),
 
+            NotificationEvents.AppointmentUpdated when GetStr(payload, "changeKind") == "edited" => (
+                actorRole == "provider" ? "ผู้ให้บริการแก้ไขรายละเอียดนัดหมาย" : "ลูกค้าแก้ไขรายละเอียดนัดหมาย",
+                JoinLines(
+                    serviceBlock,
+                    "กรุณาตรวจสอบวันเวลาและสถานที่ล่าสุด",
+                    FormatScheduledAt(GetStr(payload, "scheduledAt"))),
+                null),
+
             NotificationEvents.AppointmentUpdated => (
                 AppointmentUpdatedTitle(GetStr(payload, "status"), toProvider, actorRole),
                 JoinLines(
@@ -68,10 +76,24 @@ public static class NotificationMessageBuilder
                 JoinLines(serviceBlock, $"เหลือ {GetStr(payload, "daysRemaining")} วัน"),
                 $"/requester/bids?requestId={GetStr(payload, "requestId")}"),
 
+            NotificationEvents.RequestExpired when GetStr(payload, "audience") == "provider" => (
+                "งานที่คุณเสนอราคาหมดอายุแล้ว",
+                JoinLines(serviceBlock, "ผู้ประกาศไม่ได้ดำเนินการต่อภายใน 14 วัน งานนี้จึงปิดแล้ว"),
+                "/provider/requests"),
+
             NotificationEvents.RequestExpired => (
                 "ประกาศหมดอายุแล้ว",
                 serviceBlock,
                 $"/requester/bids?requestId={GetStr(payload, "requestId")}"),
+
+            NotificationEvents.SelectionCleared => (
+                "ลูกค้ายกเลิกการเลือกคุณ",
+                JoinLines(
+                    serviceBlock,
+                    GetStr(payload, "appointmentCancelled") == "true"
+                        ? "ลูกค้ายกเลิกการเลือกคุณสำหรับงานนี้ และนัดหมายที่รอยืนยันถูกยกเลิกแล้ว ไม่ต้องเดินทางไปตามนัด"
+                        : "ลูกค้ายกเลิกการเลือกคุณสำหรับงานนี้ และกลับไปพิจารณาข้อเสนออีกครั้ง"),
+                "/provider/requests"),
 
             NotificationEvents.RequestCancelled => (
                 "งานถูกยกเลิก",
