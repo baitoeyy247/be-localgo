@@ -4,6 +4,7 @@ using LocalGo.Application.Abstractions.Persistence;
 using LocalGo.Domain.Entities;
 using LocalGo.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace LocalGo.Infrastructure.Notifications;
@@ -11,7 +12,8 @@ namespace LocalGo.Infrastructure.Notifications;
 public sealed class NotificationPublisher(
     ILocalGoDbContext db,
     INotificationSender sender,
-    ILogger<NotificationPublisher> logger) : INotificationPublisher
+    ILogger<NotificationPublisher> logger,
+    LocalGo.Application.Common.IBackgroundWork? background = null) : INotificationPublisher
 {
     internal const int MaxAttempts = 5;
     /// <summary>Pending rows older than this are treated as stuck (process died / exception mid-send).</summary>
@@ -36,11 +38,36 @@ public sealed class NotificationPublisher(
             CreatedAt = DateTime.UtcNow,
         };
 
+        var t0 = LocalGo.Application.Common.ServerTiming.Start();
+        var save0 = LocalGo.Application.Common.ServerTiming.Current?.SaveMs ?? 0;
         db.NotificationLogs.Add(log);
         // N-1: the outbox row must be written even if the caller's request was aborted.
         await db.SaveChangesAsync(CancellationToken.None);
 
-        // Dispatch must not depend on the caller's request lifetime (client abort would leave Pending).
+        if (background is null)
+        {
+            // Dispatch must not depend on the caller's request lifetime (client abort would leave Pending).
+            await TrySendAsync(log, CancellationToken.None);
+        }
+        else
+        {
+            // P-1: async outbox — the request only pays for the outbox insert; send runs after the response.
+            var id = log.Id;
+            background.Enqueue((sp, ct) => sp.GetRequiredService<INotificationPublisher>() is NotificationPublisher p
+                ? p.DispatchAsync(id, ct)
+                : Task.CompletedTask);
+        }
+
+        var saved = (LocalGo.Application.Common.ServerTiming.Current?.SaveMs ?? 0) - save0;
+        var elapsed = LocalGo.Application.Common.ServerTiming.Since(t0) - TimeSpan.FromMilliseconds(saved);
+        LocalGo.Application.Common.ServerTiming.AddNotify(elapsed > TimeSpan.Zero ? elapsed : TimeSpan.Zero);
+    }
+
+    /// <summary>P-1: send one outbox row if it is still Pending (retry job may have claimed it).</summary>
+    public async Task DispatchAsync(Guid logId, CancellationToken cancellationToken = default)
+    {
+        var log = await db.NotificationLogs.FirstOrDefaultAsync(n => n.Id == logId, cancellationToken);
+        if (log is null || log.Status != NotificationStatus.Pending) return;
         await TrySendAsync(log, CancellationToken.None);
     }
 

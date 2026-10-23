@@ -30,4 +30,12 @@ public sealed class LocalGoDbContext(DbContextOptions<LocalGoDbContext> options)
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(LocalGoDbContext).Assembly);
         base.OnModelCreating(modelBuilder);
     }
+
+    // P-1: attribute DB write time to Server-Timing "save".
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        var t0 = LocalGo.Application.Common.ServerTiming.Start();
+        try { return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
+        finally { LocalGo.Application.Common.ServerTiming.AddSave(LocalGo.Application.Common.ServerTiming.Since(t0)); }
+    }
 }

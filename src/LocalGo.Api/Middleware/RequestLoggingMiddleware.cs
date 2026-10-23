@@ -20,12 +20,19 @@ public sealed class RequestLoggingMiddleware(RequestDelegate next, ILogger<Reque
         }
 
         var sw = Stopwatch.StartNew();
+        var timing = LocalGo.Application.Common.ServerTiming.Begin();
         var rid = Guid.NewGuid().ToString("N")[..12];
         context.Response.OnStarting(() =>
         {
             context.Response.Headers["X-Request-Id"] = rid;
+            // P-1: split app into load / save / notify.
+            var app = sw.Elapsed.TotalMilliseconds;
+            var save = timing.SaveMs;
+            var notify = timing.NotifyMs;
+            var load = Math.Max(0, app - save - notify);
+            string F(double v) => v.ToString("0", CultureInfo.InvariantCulture);
             context.Response.Headers["Server-Timing"] =
-                "app;dur=" + sw.Elapsed.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture);
+                $"app;dur={F(app)}, load;dur={F(load)}, save;dur={F(save)}, notify;dur={F(notify)}";
             return Task.CompletedTask;
         });
 
