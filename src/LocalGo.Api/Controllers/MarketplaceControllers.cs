@@ -599,11 +599,9 @@ public sealed class AdminController(
     }
 
     [HttpPost("ratings/recalculate")]
-    public async Task<IActionResult> RecalculateRatings(CancellationToken cancellationToken)
-    {
-        var repair = await admin.RepairSitPlaytestDataAsync(cancellationToken);
-        return Ok(repair);
-    }
+    public async Task<IActionResult> RecalculateRatings(CancellationToken cancellationToken) =>
+        // A-2: ratings only — no repair, no purge, no deletes (works with the dev gate off).
+        Ok(await admin.RecalculateRatingsOnlyAsync(cancellationToken));
 
     [HttpPost("test-data/repair")]
     public async Task<IActionResult> RepairTestData([FromServices] IConfiguration config, [FromServices] IWebHostEnvironment env, CancellationToken cancellationToken)
@@ -870,17 +868,21 @@ public sealed class AdminController(
             })
             .ToListAsync(cancellationToken);
 
+        // A-3: parse payloads once and batch-load related requests/categories for the whole page
+        // (was one BuildAsync DB round trip per row → N+1).
+        var payloads = rows.Select(n => TryParsePayload(n.PayloadJson)).ToList();
+        var lookup = await LocalGo.Infrastructure.Notifications.NotificationLookup.LoadAsync(payloads, db, cancellationToken);
+
         var result = new List<object>(rows.Count);
-        foreach (var n in rows)
+        for (var i = 0; i < rows.Count; i++)
         {
+            var n = rows[i];
             string? title = null;
             string? body = null;
             string? relatedId = null;
             try
             {
-                System.Text.Json.JsonElement? payload = string.IsNullOrWhiteSpace(n.PayloadJson)
-                    ? null
-                    : System.Text.Json.JsonDocument.Parse(n.PayloadJson).RootElement;
+                var payload = payloads[i];
                 if (payload is { ValueKind: System.Text.Json.JsonValueKind.Object } pe)
                 {
                     foreach (var key in new[] { "appointmentId", "bidId", "requestId", "providerId" })
@@ -894,7 +896,7 @@ public sealed class AdminController(
                 }
 
                 var (alt, message) = await LocalGo.Infrastructure.Notifications.NotificationMessageBuilder.BuildAsync(
-                    n.EventType, payload, string.Empty, db, n.UserId, cancellationToken);
+                    n.EventType, payload, string.Empty, db, n.UserId, cancellationToken, lookup);
                 title = alt;
                 body = string.Join(" | ", CollectTexts(System.Text.Json.JsonSerializer.SerializeToElement(message)).Where(x => x != alt).Distinct());
             }
@@ -923,6 +925,19 @@ public sealed class AdminController(
 
         Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
         return Ok(result);
+    }
+
+    private static System.Text.Json.JsonElement? TryParsePayload(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return System.Text.Json.JsonDocument.Parse(json).RootElement;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<string> CollectTexts(System.Text.Json.JsonElement e)

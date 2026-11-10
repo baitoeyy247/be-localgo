@@ -14,13 +14,14 @@ public static class NotificationMessageBuilder
         string liffBaseUrl,
         ILocalGoDbContext db,
         Guid? recipientUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        NotificationLookup? lookup = null)
     {
-        var ctx = await ResolveServiceContextAsync(payload, db, cancellationToken);
+        var ctx = await ResolveServiceContextAsync(payload, db, lookup, cancellationToken);
         var serviceBlock = FormatServiceContext(ctx);
         var actorRole = GetStr(payload, "actorRole");
         var toProvider = eventType is NotificationEvents.AppointmentCreated or NotificationEvents.AppointmentUpdated
-            && await IsProviderRecipientAsync(payload, recipientUserId, actorRole, db, cancellationToken);
+            && await IsProviderRecipientAsync(payload, recipientUserId, actorRole, db, lookup, cancellationToken);
 
         var (title, body, liffPath) = eventType switch
         {
@@ -137,6 +138,7 @@ public static class NotificationMessageBuilder
                 payload,
                 recipientUserId,
                 db,
+                lookup,
                 cancellationToken);
         }
 
@@ -178,9 +180,25 @@ public static class NotificationMessageBuilder
         return requestTitle ?? "";
     }
 
+    /// <summary>One request lookup: from the page-level batch when present, otherwise a single query.</summary>
+    private static async Task<NotificationRequestInfo?> FindRequestAsync(
+        Guid requestId, ILocalGoDbContext db, NotificationLookup? lookup, CancellationToken cancellationToken)
+    {
+        if (lookup is not null)
+        {
+            return lookup.Requests.TryGetValue(requestId, out var hit) ? hit : null;
+        }
+
+        return await db.ServiceRequests.AsNoTracking()
+            .Where(r => r.Id == requestId)
+            .Select(r => new NotificationRequestInfo(r.Title, r.Category.Name, r.RequesterUserId))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     private static async Task<ServiceContext?> ResolveServiceContextAsync(
         JsonElement? payload,
         ILocalGoDbContext db,
+        NotificationLookup? lookup,
         CancellationToken cancellationToken)
     {
         var title = GetStr(payload, "title");
@@ -188,10 +206,8 @@ public static class NotificationMessageBuilder
 
         if (Guid.TryParse(GetStr(payload, "requestId"), out var requestId))
         {
-            var fromRequest = await db.ServiceRequests.AsNoTracking()
-                .Where(r => r.Id == requestId)
-                .Select(r => new ServiceContext(r.Title, r.Category.Name))
-                .FirstOrDefaultAsync(cancellationToken);
+            var info = await FindRequestAsync(requestId, db, lookup, cancellationToken);
+            var fromRequest = info is null ? null : new ServiceContext(info.Title, info.CategoryName);
 
             if (fromRequest is not null)
             {
@@ -203,10 +219,8 @@ public static class NotificationMessageBuilder
 
         if (Guid.TryParse(GetStr(payload, "serviceRequestId"), out var serviceRequestId))
         {
-            var fromReview = await db.ServiceRequests.AsNoTracking()
-                .Where(r => r.Id == serviceRequestId)
-                .Select(r => new ServiceContext(r.Title, r.Category.Name))
-                .FirstOrDefaultAsync(cancellationToken);
+            var info = await FindRequestAsync(serviceRequestId, db, lookup, cancellationToken);
+            var fromReview = info is null ? null : new ServiceContext(info.Title, info.CategoryName);
 
             if (fromReview is not null)
             {
@@ -218,10 +232,12 @@ public static class NotificationMessageBuilder
 
         if (string.IsNullOrWhiteSpace(categoryName) && Guid.TryParse(GetStr(payload, "categoryId"), out var categoryId))
         {
-            categoryName = await db.ServiceCategories.AsNoTracking()
-                .Where(c => c.Id == categoryId)
-                .Select(c => c.Name)
-                .FirstOrDefaultAsync(cancellationToken) ?? "";
+            categoryName = lookup is not null
+                ? (lookup.Categories.TryGetValue(categoryId, out var name) ? name : "")
+                : await db.ServiceCategories.AsNoTracking()
+                    .Where(c => c.Id == categoryId)
+                    .Select(c => c.Name)
+                    .FirstOrDefaultAsync(cancellationToken) ?? "";
         }
 
         if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(categoryName))
@@ -238,6 +254,7 @@ public static class NotificationMessageBuilder
         JsonElement? payload,
         Guid? recipientUserId,
         ILocalGoDbContext db,
+        NotificationLookup? lookup,
         CancellationToken cancellationToken)
     {
         var requestIdStr = GetStr(payload, "requestId");
@@ -251,10 +268,7 @@ public static class NotificationMessageBuilder
             return $"/requester/appointment?requestId={requestIdStr}";
         }
 
-        var requesterUserId = await db.ServiceRequests.AsNoTracking()
-            .Where(r => r.Id == requestId)
-            .Select(r => r.RequesterUserId)
-            .FirstOrDefaultAsync(cancellationToken);
+        var requesterUserId = (await FindRequestAsync(requestId, db, lookup, cancellationToken))?.RequesterUserId;
 
         if (requesterUserId == recipientUserId)
         {
@@ -284,14 +298,11 @@ public static class NotificationMessageBuilder
     };
 
     private static async Task<bool> IsProviderRecipientAsync(
-        JsonElement? payload, Guid? recipientUserId, string actorRole, ILocalGoDbContext db, CancellationToken ct)
+        JsonElement? payload, Guid? recipientUserId, string actorRole, ILocalGoDbContext db, NotificationLookup? lookup, CancellationToken ct)
     {
         if (recipientUserId is not null && Guid.TryParse(GetStr(payload, "requestId"), out var requestId))
         {
-            var requesterUserId = await db.ServiceRequests.AsNoTracking()
-                .Where(r => r.Id == requestId)
-                .Select(r => (Guid?)r.RequesterUserId)
-                .FirstOrDefaultAsync(ct);
+            var requesterUserId = (await FindRequestAsync(requestId, db, lookup, ct))?.RequesterUserId;
             if (requesterUserId is not null)
             {
                 return requesterUserId != recipientUserId;

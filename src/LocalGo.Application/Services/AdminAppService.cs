@@ -37,24 +37,42 @@ public sealed class AdminAppService(
     public static readonly Guid MisassignedReviewRequestId =
         Guid.Parse("bf9b907c-aefa-4bc4-91e5-138958eff2f8");
 
+    /// <summary>
+    /// A-3: KPI counts in 4 round trips (was 6 sequential COUNTs): users, providers,
+    /// one GROUP BY over request status, pending notifications.
+    /// </summary>
     public async Task<AdminDashboardDto> GetDashboardAsync(CancellationToken cancellationToken)
     {
+        var users = await db.Users.AsNoTracking().CountAsync(cancellationToken);
+        var providers = await db.Providers.AsNoTracking().CountAsync(cancellationToken);
+        var byStatus = await db.ServiceRequests.AsNoTracking()
+            .GroupBy(r => r.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var pendingNotifications = await db.NotificationLogs.AsNoTracking()
+            .CountAsync(n => n.Status == NotificationStatus.Pending, cancellationToken);
+
+        int Count(Func<ServiceRequestStatus, bool> match) => byStatus.Where(x => match(x.Status)).Sum(x => x.Count);
         return new AdminDashboardDto(
-            await db.Users.AsNoTracking().CountAsync(cancellationToken),
-            await db.Providers.AsNoTracking().CountAsync(cancellationToken),
-            await db.ServiceRequests.AsNoTracking()
-                .CountAsync(
-                    r => r.Status != ServiceRequestStatus.Draft
-                        && r.Status != ServiceRequestStatus.Cancelled
-                        && r.Status != ServiceRequestStatus.Completed
-                        && r.Status != ServiceRequestStatus.Expired,
-                    cancellationToken),
-            await db.ServiceRequests.AsNoTracking()
-                .CountAsync(r => r.Status == ServiceRequestStatus.Completed, cancellationToken),
-            await db.ServiceRequests.AsNoTracking()
-                .CountAsync(r => r.Status == ServiceRequestStatus.Expired, cancellationToken),
-            await db.NotificationLogs.AsNoTracking()
-                .CountAsync(n => n.Status == NotificationStatus.Pending, cancellationToken));
+            users,
+            providers,
+            Count(s => s != ServiceRequestStatus.Draft
+                && s != ServiceRequestStatus.Cancelled
+                && s != ServiceRequestStatus.Completed
+                && s != ServiceRequestStatus.Expired),
+            Count(s => s == ServiceRequestStatus.Completed),
+            Count(s => s == ServiceRequestStatus.Expired),
+            pendingNotifications);
+    }
+
+    /// <summary>
+    /// A-2: POST /api/admin/ratings/recalculate — recomputes provider rating aggregates only.
+    /// Never deletes users, requests, reviews or any other rows (unlike RepairSitPlaytestDataAsync).
+    /// </summary>
+    public async Task<object> RecalculateRatingsOnlyAsync(CancellationToken cancellationToken)
+    {
+        var providersTouched = await reviews.RecalculateAllProviderRatingsAsync(cancellationToken);
+        return new { providersRecalculated = providersTouched };
     }
 
     public async Task<AdminUsersPageDto> ListUsersAsync(int page, int pageSize, CancellationToken cancellationToken)
