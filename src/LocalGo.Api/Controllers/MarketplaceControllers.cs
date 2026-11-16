@@ -46,10 +46,13 @@ public sealed class ProvidersController(ICurrentUserService currentUser, Provide
         }
 
         var dto = mapper.Map<ProviderResponseDto>(provider);
+        // PDPA: phone, LINE id, and contact URL stay hidden until the viewer owns the
+        // shop or has a non-pending/non-cancelled appointment with this provider.
         if (!await providers.ViewerMaySeeContactAsync(currentUser.UserId, providerId, cancellationToken))
         {
             dto.ContactLineId = null;
             dto.ContactPhone = null;
+            dto.ContactUrl = null;
         }
 
         return Ok(dto);
