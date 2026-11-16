@@ -90,7 +90,9 @@ public sealed class ProviderResponseDto
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ContactPhone { get; set; }
-    public string? ContactUrl { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContactUrl { get; set; }
     public required string Status { get; init; }
     public decimal AverageVerifiedRating { get; init; }
     public decimal AveragePublicRating { get; init; }

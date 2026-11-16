@@ -134,7 +134,32 @@ public sealed class RemainingQaTests
 
         Assert.DoesNotContain("contactPhone", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("contactLineId", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("contactUrl", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ownerUserId", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Hidden_contact_clears_url_alongside_phone_and_line()
+    {
+        // Mirrors ProvidersController.GetPublic when ViewerMaySeeContactAsync is false.
+        var dto = new ProviderResponseDto
+        {
+            Id = Guid.NewGuid(),
+            ProviderType = "Individual",
+            Name = "Hidden Contact",
+            Status = "Active",
+            ContactPhone = "0812345678",
+            ContactLineId = "line-secret",
+            ContactUrl = "https://line.me/ti/p/~line-secret",
+        };
+        dto.ContactPhone = null;
+        dto.ContactLineId = null;
+        dto.ContactUrl = null;
+        var json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.DoesNotContain("0812345678", json);
+        Assert.DoesNotContain("line-secret", json);
+        Assert.DoesNotContain("line.me", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
